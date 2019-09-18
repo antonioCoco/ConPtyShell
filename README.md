@@ -14,10 +14,10 @@ ConPtyShell isn't an "Upgrade to fully interactive" method for your reverse shel
 
 If you want to know further information regarding ConPty you can find a great article [1] in the references section.
 
-**NOTE: ConPtyShell uses the function <a href="https://docs.microsoft.com/en-us/windows/console/createpseudoconsole">CreatePseudoConsole()</a>. This function is available since Windows 10 / Windows Server 2019 version 1809.**
+**NOTE: ConPtyShell uses the function <a href="https://docs.microsoft.com/en-us/windows/console/createpseudoconsole">CreatePseudoConsole()</a>. This function is available since Windows 10 / Windows Server 2019 version 1809 (build 10.0.17763).**
 
 ## Requirements
-<p>Client Side: Windows version >= 10 / 2019 1809</p>
+<p>Client Side: Windows version >= 10 / 2019 1809 (build >= 10.0.17763)</p>
 <p>Server Side: any tcp listener, i.e. netcat</p>
 
 ## Usage
