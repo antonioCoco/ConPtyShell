@@ -16,6 +16,8 @@ If you want to know further information regarding ConPty you can find a great ar
 
 **NOTE: ConPtyShell uses the function <a href="https://docs.microsoft.com/en-us/windows/console/createpseudoconsole">CreatePseudoConsole()</a>. This function is available since Windows 10 / Windows Server 2019 version 1809 (build 10.0.17763).**
 
+**NOTE2: If the ConPTY is not available on the target system you will get a normal netcat-like interactive shell.**
+
 ## Requirements
 <p>Client Side: Windows version >= 10 / 2019 1809 (build >= 10.0.17763)</p>
 <p>Server Side: any tcp listener, i.e. netcat</p>
