@@ -15,6 +15,7 @@ public static class ConPtyShell
     private const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     private const uint CREATE_NO_WINDOW = 0x08000000;
     private const int STARTF_USESTDHANDLES = 0x00000100;
+    private const int BUFFER_SIZE_PIPE = 1048576;
 
     private const UInt32 INFINITE = 0xFFFFFFFF;
     private const uint GENERIC_READ = 0x80000000;
@@ -113,7 +114,7 @@ public static class ConPtyShell
     private static extern bool CloseHandle(IntPtr hObject);
     
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, SECURITY_ATTRIBUTES lpPipeAttributes, int nSize);
+    private static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, ref SECURITY_ATTRIBUTES lpPipeAttributes, int nSize);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, CallingConvention = CallingConvention.StdCall, SetLastError = true)]
     private static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess, uint dwShareMode, IntPtr SecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
@@ -179,9 +180,9 @@ public static class ConPtyShell
     private static void CreatePipes(ref IntPtr InputPipeRead, ref IntPtr InputPipeWrite, ref IntPtr OutputPipeRead, ref IntPtr OutputPipeWrite){
         int securityAttributeSize = Marshal.SizeOf<SECURITY_ATTRIBUTES>();
         SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES { nLength = securityAttributeSize, bInheritHandle=1, lpSecurityDescriptor=IntPtr.Zero };
-        if(!CreatePipe(out InputPipeRead, out InputPipeWrite, pSec, 0))
+        if(!CreatePipe(out InputPipeRead, out InputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
             throw new InvalidOperationException("Could not create the InputPipe");
-        if(!CreatePipe(out OutputPipeRead, out OutputPipeWrite, pSec, 0))
+        if(!CreatePipe(out OutputPipeRead, out OutputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
             throw new InvalidOperationException("Could not create the OutputPipe");
     }
     
