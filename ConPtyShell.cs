@@ -178,8 +178,10 @@ public static class ConPtyShell
     }
     
     private static void CreatePipes(ref IntPtr InputPipeRead, ref IntPtr InputPipeWrite, ref IntPtr OutputPipeRead, ref IntPtr OutputPipeWrite){
-        int securityAttributeSize = Marshal.SizeOf<SECURITY_ATTRIBUTES>();
-        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES { nLength = securityAttributeSize, bInheritHandle=1, lpSecurityDescriptor=IntPtr.Zero };
+        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES();
+        pSec.nLength = Marshal.SizeOf(pSec);
+        pSec.bInheritHandle=1;
+        pSec.lpSecurityDescriptor=IntPtr.Zero;
         if(!CreatePipe(out InputPipeRead, out InputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
             throw new InvalidOperationException("Could not create the InputPipe");
         if(!CreatePipe(out OutputPipeRead, out OutputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
@@ -212,7 +214,10 @@ public static class ConPtyShell
     private static int CreatePseudoConsoleWithPipes(ref IntPtr handlePseudoConsole, ref IntPtr ConPtyInputPipeRead, ref IntPtr ConPtyOutputPipeWrite, uint rows, uint cols){
         int result = -1;
         EnableVirtualTerminalSequenceProcessing();
-        result = CreatePseudoConsole(new COORD { X = (short)cols, Y = (short)rows }, ConPtyInputPipeRead, ConPtyOutputPipeWrite, 0, out handlePseudoConsole);
+        COORD consoleCoord = new COORD();
+        consoleCoord.X=(short)cols;
+        consoleCoord.Y=(short)rows;
+        result = CreatePseudoConsole(consoleCoord, ConPtyInputPipeRead, ConPtyOutputPipeWrite, 0, out handlePseudoConsole);
         return result;
     }
     
@@ -225,7 +230,7 @@ public static class ConPtyShell
             throw new InvalidOperationException("Could not calculate the number of bytes for the attribute list. " + Marshal.GetLastWin32Error());
         }
         STARTUPINFOEX startupInfo = new STARTUPINFOEX();
-        startupInfo.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
+        startupInfo.StartupInfo.cb = Marshal.SizeOf(startupInfo);
         startupInfo.lpAttributeList = Marshal.AllocHGlobal(lpSize);
         success = InitializeProcThreadAttributeList(startupInfo.lpAttributeList, 1, 0, ref lpSize);
         if (!success)
@@ -243,9 +248,11 @@ public static class ConPtyShell
     private static PROCESS_INFORMATION RunProcess(ref STARTUPINFOEX sInfoEx, string commandLine)
     {
         PROCESS_INFORMATION pInfo = new PROCESS_INFORMATION();
-        int securityAttributeSize = Marshal.SizeOf<SECURITY_ATTRIBUTES>();
-        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES { nLength = securityAttributeSize };
-        SECURITY_ATTRIBUTES tSec = new SECURITY_ATTRIBUTES { nLength = securityAttributeSize };
+        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES();
+        int securityAttributeSize = Marshal.SizeOf(pSec);
+        pSec.nLength = securityAttributeSize;
+        SECURITY_ATTRIBUTES tSec = new SECURITY_ATTRIBUTES();
+        tSec.nLength = securityAttributeSize;
         bool success = CreateProcess(null, commandLine, ref pSec, ref tSec, false, EXTENDED_STARTUPINFO_PRESENT, IntPtr.Zero, null, ref sInfoEx, out pInfo);
         if (!success)
         {
