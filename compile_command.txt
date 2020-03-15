@@ -1,5 +1,5 @@
 .NET 4.0
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -target:exe -optimize -out:ConPtyShell.exe ConPtyShell.cs
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -target:exe -optimize -out:ConPtyShell_net4.exe ConPtyShell.cs
 
 .NET 2.0
-C:\Windows\Microsoft.NET\Framework64\v2.0.50727\csc.exe -target:exe -optimize -out:ConPtyShell.exe ConPtyShell.cs
+C:\Windows\Microsoft.NET\Framework64\v2.0.50727\csc.exe -target:exe -optimize -out:ConPtyShell_net2.exe ConPtyShell.cs

