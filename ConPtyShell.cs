@@ -1081,7 +1081,6 @@ Examples:
             uint rows = ParseRows(args);
             uint cols = ParseCols(args);
             string commandLine = ParseCommandLine(args);
-            upgradeShell = true;
             output=ConPtyShell.SpawnConPtyShell(remoteIp, remotePort, rows, cols, commandLine, upgradeShell);
         }
         return output;
