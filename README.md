@@ -118,6 +118,8 @@ Below in the video you can watch a simulated scenario where on the left terminal
 
 1. https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
 2. https://github.com/microsoft/terminal
+3. https://www.usenix.org/conference/usenixsecurity20/presentation/niakanlahiji
+4. https://adepts.of0x.cc/shadowmove-hijack-socket/
 
 ## Credits
 
