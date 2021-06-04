@@ -55,8 +55,7 @@ stty size
 nc -lvnp 3001
 Wait For connection
 ctrl+z
-stty raw -echo
-fg[ENTER]
+stty raw -echo; fg[ENTER]
 ```
 ##### Client Side:
 Here you should use the values read from ```stty size``` command in the Parameters -Rows and -Cols
@@ -83,8 +82,7 @@ stty size
 nc -lvnp 3001
 Wait For connection
 ctrl+z
-stty raw -echo
-fg[ENTER]
+stty raw -echo; fg[ENTER]
 ```
 ##### Client Side:
 Here you should use the values read from ```stty size``` command in the Parameters -Rows and -Cols
