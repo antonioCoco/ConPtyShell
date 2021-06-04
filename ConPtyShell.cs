@@ -865,6 +865,7 @@ public static class ConPtyShell
         
         PROCESS_INFORMATION childProcessInfo = new PROCESS_INFORMATION();
         CreatePipes(ref InputPipeRead, ref InputPipeWrite, ref OutputPipeRead, ref OutputPipeWrite);
+        // comment the below function to debug errors
         InitConsole(ref oldStdIn, ref oldStdOut, ref oldStdErr);
         
         if(conptyCompatible){
