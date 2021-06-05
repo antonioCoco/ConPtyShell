@@ -416,6 +416,7 @@ public static class SocketHijacking {
         }
         Marshal.FreeHGlobal(ptrHandlesInfo);
         if (socketsHandles.Count >= 2)
+            // ordering for newer handles we have a higher chance to get the proper socket
             socketsHandles.Sort(delegate (IntPtr a, IntPtr b) { return (b.ToInt64().CompareTo(a.ToInt64())); });
         return socketsHandles;
     }
