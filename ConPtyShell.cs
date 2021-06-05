@@ -363,14 +363,20 @@ public static class SocketHijacking {
         // get TypeIndex for "File" objects, needed to filter only sockets objects
         byte TypeIndexFileObject = GetTypeIndexByName("File");
         for(int i=0; i < HandlesCount; i++){
-            SYSTEM_HANDLE_TABLE_ENTRY_INFO sysHandle = (SYSTEM_HANDLE_TABLE_ENTRY_INFO)Marshal.PtrToStructure(ptrHandlesInfoCurrent, typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO));
+            SYSTEM_HANDLE_TABLE_ENTRY_INFO sysHandle;
+            try {
+                sysHandle = (SYSTEM_HANDLE_TABLE_ENTRY_INFO)Marshal.PtrToStructure(ptrHandlesInfoCurrent, typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO));
+            }
+            catch {
+                break;
+            }
             //move pointer to next SYSTEM_HANDLE_TABLE_ENTRY_INFO
             ptrHandlesInfoCurrent = (IntPtr)(ptrHandlesInfoCurrent.ToInt64() + Marshal.SizeOf(new SYSTEM_HANDLE_TABLE_ENTRY_INFO()));
             if (sysHandle.UniqueProcessId != targetProcess.Id || sysHandle.ObjectTypeIndex != TypeIndexFileObject)
                 continue;
             if(DuplicateHandle(hTargetProcess, (IntPtr)sysHandle.HandleValue, GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS)){
                 if(deadlockCheckHelperObj.CheckDeadlockDetected(dupHandle)){ // this will avoids deadlocks on special named pipe handles
-                    //Console.WriteLine("debug: Deadlock detected");
+                    // Console.WriteLine("debug: Deadlock detected");
                     CloseHandle(dupHandle);
                     continue;
                 }
@@ -379,12 +385,17 @@ public static class SocketHijacking {
                     CloseHandle(dupHandle);
                     continue;
                 }
-                objNameInfo = (OBJECT_NAME_INFORMATION)Marshal.PtrToStructure(ptrObjectName, typeof(OBJECT_NAME_INFORMATION));
-                if (objNameInfo.Name.Buffer != IntPtr.Zero && objNameInfo.Name.Length > 0 )
+                try {
+                    objNameInfo = (OBJECT_NAME_INFORMATION)Marshal.PtrToStructure(ptrObjectName, typeof(OBJECT_NAME_INFORMATION));
+                }
+                catch {
+                    continue;
+                }
+                if (objNameInfo.Name.Buffer != IntPtr.Zero && objNameInfo.Name.Length > 0)
                 {
                     strObjectName = Marshal.PtrToStringUni(objNameInfo.Name.Buffer, objNameInfo.Name.Length / 2);
-                    //Console.WriteLine("debug: strObjectName " + strObjectName);
-                    if(strObjectName == "\\Device\\Afd"){
+                    // Console.WriteLine("debug: strObjectName " + strObjectName);
+                    if (strObjectName == "\\Device\\Afd") {
                         socketHandle = dupHandle;
                         break;
                     }
@@ -392,8 +403,9 @@ public static class SocketHijacking {
                         CloseHandle(dupHandle);
                 }
                 Marshal.FreeHGlobal(ptrObjectName);
+                ptrObjectName = IntPtr.Zero;
                 CloseHandle(dupHandle);
-            }
+                }
         }
         Marshal.FreeHGlobal(ptrHandlesInfo);
         return socketHandle;
