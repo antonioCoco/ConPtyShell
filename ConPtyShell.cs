@@ -1039,6 +1039,7 @@ public static class ConPtyShell
         //Threads have better performance than Tasks
         Thread thThreadReadPipeWriteSocket = StartThreadReadPipeWriteSocket(OutputPipeRead, shellSocket);
         Thread thReadSocketWritePipe = StartThreadReadSocketWritePipe(InputPipeWrite, shellSocket, childProcessInfo.hProcess);
+        // we need to suspend other processes that can interact with the duplicated sockets if any. This will ensure stdin, stdout and stderr is read/write only by our conpty process
         if(upgradeShell && parentSocketInherited) NtSuspendProcess(parentProcess.Handle);
         if(upgradeShell && grandParentSocketInherited) NtSuspendProcess(grandParentProcess.Handle);
         WaitForSingleObject(childProcessInfo.hProcess, INFINITE);
