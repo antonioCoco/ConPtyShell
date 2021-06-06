@@ -49,7 +49,7 @@ public class DeadlockCheckHelper{
         uint threadId = 0;
         //we need native threads, C# threads hang and go in lock. We need to avoids hangs on named pipe so... No hangs no deadlocks... no pain no gains...
         hThread = CreateThread(0, 0, delegateThreadCheckDeadlock, IntPtr.Zero, 0, out threadId);
-        WaitForSingleObject(hThread, 1000);
+        WaitForSingleObject(hThread, 3000);
         //we do not kill the "pending" threads here with TerminateThread() because it will crash the whole process if we do it on locked threads.
         //just some waste of threads :(
         CloseHandle(hThread);
