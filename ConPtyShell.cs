@@ -1036,12 +1036,11 @@ public static class ConPtyShell
                 List<IntPtr> socketsHandles = new List<IntPtr>();
                 currentProcess = Process.GetCurrentProcess();
                 parentProcess = ParentProcessUtilities.GetParentProcess(currentProcess.Handle);
-                grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
+                if (parentProcess != null)  grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
                 // try to duplicate the socket for the current process
                 shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
                 if (shellSocket != IntPtr.Zero){
-                    if(parentProcess != null)
-                        parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
+                    if(parentProcess != null) parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
                 }
                 else
                     // if no sockets are found in the current process we try to hijack our current parent process socket
