@@ -510,11 +510,12 @@ public static class SocketHijacking {
     {
         IntPtr targetSocketHandle = IntPtr.Zero;
         List<IntPtr> targetProcessSockets = GetSocketsTargetProcess(targetProcess);
-        if(targetProcessSockets.Count < 1)
-            throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
-        else{
+        if (targetProcessSockets.Count < 1)
+            return targetSocketHandle;
+        else
+        {
             WSAData data;
-            if( WSAStartup(2 << 8 | 2, out data) != 0 )
+            if (WSAStartup(2 << 8 | 2, out data) != 0)
                 throw new ConPtyShellException(String.Format("WSAStartup failed with error code: {0}", WSAGetLastError()));
             foreach (IntPtr socketHandle in targetProcessSockets) {
                 IntPtr dupSocketHandle = IntPtr.Zero;
