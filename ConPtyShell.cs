@@ -238,9 +238,6 @@ public static class SocketHijacking {
         public byte SynRetrans;
     }
 
-    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
-
     [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern int WSADuplicateSocket(IntPtr socketHandle, int processId, ref WSAPROTOCOL_INFO pinnedBuffer);
 
