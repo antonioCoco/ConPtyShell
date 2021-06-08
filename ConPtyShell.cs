@@ -36,8 +36,10 @@ public class DeadlockCheckHelper{
     
     private uint ThreadCheckDeadlock(uint threadParams)
     {
-        SocketHijacking.NtQueryObjectDynamic(this.targetHandle, SocketHijacking.OBJECT_INFORMATION_CLASS.ObjectNameInformation, 0);
+        IntPtr objPtr = IntPtr.Zero;
+        objPtr = SocketHijacking.NtQueryObjectDynamic(this.targetHandle, SocketHijacking.OBJECT_INFORMATION_CLASS.ObjectNameInformation, 0);
         this.deadlockDetected = false;
+        if (objPtr != IntPtr.Zero) Marshal.FreeHGlobal(objPtr);
         return 0;
     }
     
