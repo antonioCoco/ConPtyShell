@@ -1116,7 +1116,7 @@ public static class ConPtyShell
         pSec.nLength = securityAttributeSize;
         SECURITY_ATTRIBUTES tSec = new SECURITY_ATTRIBUTES();
         tSec.nLength = securityAttributeSize;
-        bool success = CreateProcess(null, commandLine, ref pSec, ref tSec, false, EXTENDED_STARTUPINFO_PRESENT, IntPtr.Zero, null, ref sInfoEx, out pInfo);
+        bool success = CreateProcessEx(null, commandLine, ref pSec, ref tSec, false, EXTENDED_STARTUPINFO_PRESENT, IntPtr.Zero, null, ref sInfoEx, out pInfo);
         if (!success)
         {
             throw new ConPtyShellException("Could not create process. " + Marshal.GetLastWin32Error());
@@ -1289,7 +1289,7 @@ public static class ConPtyShell
             sInfo.hStdInput = InputPipeRead;
             sInfo.hStdOutput = OutputPipeWrite;
             sInfo.hStdError = OutputPipeWrite;
-            CreateProcessEx(null, commandLine, IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero, null, ref sInfo, out childProcessInfo);
+            CreateProcess(null, commandLine, IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero, null, ref sInfo, out childProcessInfo);
         }
         // Note: We can close the handles to the PTY-end of the pipes here
         // because the handles are dup'ed into the ConHost and will be released
