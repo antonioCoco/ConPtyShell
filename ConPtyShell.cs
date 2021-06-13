@@ -1440,12 +1440,12 @@ Examples:
         }
         else
         {
+            string remoteIp = "";
+            int remotePort = 0;
+            bool upgradeShell = false;
             try
             {
                 CheckArgs(args);
-                string remoteIp = "";
-                int remotePort = 0;
-                bool upgradeShell = false;
                 if (args[0].Contains("upgrade"))
                     upgradeShell = true;
                 else
