@@ -53,7 +53,7 @@ public class DeadlockCheckHelper
         uint threadId = 0;
         //we need native threads, C# threads hang and go in lock. We need to avoids hangs on named pipe so... No hangs no deadlocks... no pain no gains...
         hThread = CreateThread(0, 0, delegateThreadCheckDeadlock, IntPtr.Zero, 0, out threadId);
-        WaitForSingleObject(hThread, 3000);
+        WaitForSingleObject(hThread, 1500);
         //we do not kill the "pending" threads here with TerminateThread() because it will crash the whole process if we do it on locked threads.
         //just some waste of threads :(
         CloseHandle(hThread);
@@ -693,7 +693,7 @@ public static class SocketHijacking
                 }
                 if (!IsSocketOverlapped(dupSocketHandle))
                 {
-                    Console.WriteLine("debug: found non overlapped socket 0x" + dupSocketHandle.ToString("X4") + " skpping...");
+                    Console.WriteLine("Found a usable socket, but it has not been created with the flag WSA_FLAG_OVERLAPPED, skipping...");
                     closesocket(dupSocketHandle);
                     continue;
                 }
@@ -1231,17 +1231,33 @@ public static class ConPtyShell
                 if (parentProcess != null) grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
                 // try to duplicate the socket for the current process
                 shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
-                if (shellSocket != IntPtr.Zero)
-                {
-                    if (parentProcess != null) parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
-                }
-                else
+                if (shellSocket == IntPtr.Zero && parentProcess != null) {
                     // if no sockets are found in the current process we try to hijack our current parent process socket
                     shellSocket = SocketHijacking.DuplicateTargetProcessSocket(parentProcess);
-                if (shellSocket == IntPtr.Zero)
-                    throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
-                if (grandParentProcess != null)
-                    grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);
+                    if (shellSocket == IntPtr.Zero && grandParentProcess != null)
+                    {
+                        // damn, even the parent process has no usable sockets, let's try a last desperate attempt in the grandparent process
+                        shellSocket = SocketHijacking.DuplicateTargetProcessSocket(grandParentProcess);
+                        if (shellSocket == IntPtr.Zero)
+                        {
+                            throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
+                        }
+                        else {
+                            grandParentSocketInherited = true;
+                        }
+                    }
+                    else {
+                        // gotcha a usable socket from the parent process, let's see if the grandParent also use the socket
+                        parentSocketInherited = true;
+                        if (grandParentProcess != null) grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);
+                    }
+                }
+                else
+                {
+                    // the current process got a usable socket, let's see if the parents use the socket
+                    if (parentProcess != null) parentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, parentProcess);
+                    if (grandParentProcess != null) grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);
+                }
             }
             else
             {
@@ -1259,8 +1275,8 @@ public static class ConPtyShell
                 ShowWindow(GetConsoleWindow(), SW_HIDE);
                 newConsoleAllocated = true;
             }
-            Console.WriteLine("debug: Creating pseudo console...");
-            return "";
+            // Console.WriteLine("debug: Creating pseudo console...");
+            // return "";
             int pseudoConsoleCreationResult = CreatePseudoConsoleWithPipes(ref handlePseudoConsole, ref InputPipeRead, ref OutputPipeWrite, rows, cols);
             if (pseudoConsoleCreationResult != 0)
             {
