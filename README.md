@@ -92,7 +92,7 @@ IEX(Get-Content .\Invoke-ConPtyShell.ps1 -Raw); Invoke-ConPtyShell -Upgrade -Row
 ```
 
 
-#### Change Console Size
+## Change Console Size
 
 In any case if you resize your terminal while you have already open the remote shell you can change the rows and cols size directly from powershell pasting the following code:
 
