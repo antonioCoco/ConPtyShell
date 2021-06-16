@@ -104,11 +104,13 @@ $Host.UI.RawUI.WindowSize = New-Object -TypeName System.Management.Automation.Ho
 ```
 
 ## Demo
-Below in the video you can watch a simulated scenario where on the left terminal i have a limited access to the server through a webshell and on the right i spawn a fully interactive reverse shell playing around:
+Below you can watch 2 demos. The first gif using the **Method 1** with the compiled assemlby in exe format, the second gif is showing the **Method 3** by upgrading your current shell with the ps1 script:
 
-<img src="https://drive.google.com/uc?id=1xPfNYjhTI5LpovDIustGxkzjNNg2Hc6l">
+#### Method 1
 
-### Upgrade demo
+<img src="demo_1.gif">
+
+#### Method 2 - Upgrade demo
 
 <img src="https://drive.google.com/uc?id=1PRuy_qgezsG0rQ7kjSYl6hxlJMLobTh8">
 
