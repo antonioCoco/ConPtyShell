@@ -1011,7 +1011,6 @@ public static class ConPtyShell
 
         IntPtr socket = IntPtr.Zero;
         socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, WSA_FLAG_OVERLAPPED);
-
         SOCKADDR_IN sockinfo = new SOCKADDR_IN();
         sockinfo.sin_family = (short)2;
         sockinfo.sin_addr = inet_addr(host);
@@ -1166,7 +1165,7 @@ public static class ConPtyShell
         {
             byte[] bytesToWrite = new byte[bufferSize];
             readSuccess = ReadFile(OutputPipeRead, bytesToWrite, (uint)bufferSize, out dwBytesRead, IntPtr.Zero);
-            bytesSent = send(shellSocket, bytesToWrite, bufferSize, 0);
+            bytesSent = send(shellSocket, bytesToWrite, (int)dwBytesRead, 0);
         } while (bytesSent > 0 && readSuccess);
         // Console.WriteLine("debug: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
     }
