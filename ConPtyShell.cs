@@ -334,7 +334,8 @@ public static class SocketHijacking
         public byte[] HelperData;
     }
 
-    private struct SOCKET_BYTESIN {
+    private struct SOCKET_BYTESIN
+    {
         public IntPtr handle;
         public UInt64 BytesIn;
     }
@@ -454,9 +455,10 @@ public static class SocketHijacking
     {
         List<IntPtr> dupedSocketsOut = new List<IntPtr>();
         if (sockets.Count < 1) return dupedSocketsOut;
-        foreach (IntPtr sock in sockets) {
+        foreach (IntPtr sock in sockets)
+        {
             IntPtr dupedSocket = DuplicateSocketFromHandle(sock);
-            if(dupedSocket != IntPtr.Zero) dupedSocketsOut.Add(dupedSocket);
+            if (dupedSocket != IntPtr.Zero) dupedSocketsOut.Add(dupedSocket);
         }
         // cleaning all socket handles
         foreach (IntPtr sock in sockets)
@@ -464,12 +466,15 @@ public static class SocketHijacking
         return dupedSocketsOut;
     }
 
-    private static List<IntPtr> FilterAndOrderSocketsByBytesIn(List<IntPtr> sockets) {
+    private static List<IntPtr> FilterAndOrderSocketsByBytesIn(List<IntPtr> sockets)
+    {
         List<SOCKET_BYTESIN> socketsBytesIn = new List<SOCKET_BYTESIN>();
         List<IntPtr> socketsOut = new List<IntPtr>();
-        foreach (IntPtr sock in sockets) {
+        foreach (IntPtr sock in sockets)
+        {
             TCP_INFO_v0 sockInfo = new TCP_INFO_v0();
-            if (!GetSocketTcpInfo(sock, out sockInfo)) {
+            if (!GetSocketTcpInfo(sock, out sockInfo))
+            {
                 closesocket(sock);
                 continue;
             }
@@ -678,7 +683,7 @@ public static class SocketHijacking
         return inherited;
     }
 
-    private static bool IsSocketOverlapped(IntPtr socket)
+    public static bool IsSocketOverlapped(IntPtr socket)
     {
         bool ret = false;
         IntPtr sockEvent = IntPtr.Zero;
@@ -1249,7 +1254,8 @@ public static class ConPtyShell
                 if (parentProcess != null) grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
                 // try to duplicate the socket for the current process
                 shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
-                if (shellSocket == IntPtr.Zero && parentProcess != null) {
+                if (shellSocket == IntPtr.Zero && parentProcess != null)
+                {
                     // if no sockets are found in the current process we try to hijack our current parent process socket
                     shellSocket = SocketHijacking.DuplicateTargetProcessSocket(parentProcess);
                     if (shellSocket == IntPtr.Zero && grandParentProcess != null)
@@ -1260,11 +1266,13 @@ public static class ConPtyShell
                         {
                             throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
                         }
-                        else {
+                        else
+                        {
                             grandParentSocketInherited = true;
                         }
                     }
-                    else {
+                    else
+                    {
                         // gotcha a usable socket from the parent process, let's see if the grandParent also use the socket
                         parentSocketInherited = true;
                         if (grandParentProcess != null) grandParentSocketInherited = SocketHijacking.IsSocketInherited(shellSocket, grandParentProcess);
