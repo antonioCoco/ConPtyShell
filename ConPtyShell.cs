@@ -675,8 +675,6 @@ public static class SocketHijacking
             {
                 // Console.WriteLine("debug: found inherited socket! handle --> 0x" + parentSocketHandle.ToString("X4"));
                 inherited = true;
-                closesocket(parentSocketHandle);
-                break;
             }
             closesocket(parentSocketHandle);
         }
