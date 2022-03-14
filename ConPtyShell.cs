@@ -1189,7 +1189,7 @@ public static class ConPtyShell
         object[] threadParameters = (object[])threadParams;
         IntPtr OutputPipeRead = (IntPtr)threadParameters[0];
         IntPtr shellSocket = (IntPtr)threadParameters[1];
-        int bufferSize = 256;
+        int bufferSize = 8192;
         bool readSuccess = false;
         Int32 bytesSent = 0;
         uint dwBytesRead = 0;
@@ -1244,7 +1244,7 @@ public static class ConPtyShell
         IntPtr InputPipeWrite = (IntPtr)threadParameters[0];
         IntPtr shellSocket = (IntPtr)threadParameters[1];
         IntPtr hChildProcess = (IntPtr)threadParameters[2];
-        int bufferSize = 256;
+        int bufferSize = 8192;
         bool writeSuccess = false;
         Int32 nBytesReceived = 0;
         uint bytesWritten = 0;
