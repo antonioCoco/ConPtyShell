@@ -401,6 +401,7 @@ public static class SocketHijacking
         while (true)
         {
             uint result = (uint)NtQuerySystemInformation(infoClass, infoPtr, infoLength, ref infoLength);
+            infoLength = infoLength * 2;
             if (result == NTSTATUS_SUCCESS)
                 return infoPtr;
             Marshal.FreeHGlobal(infoPtr);  //free pointer when not Successful
@@ -834,8 +835,6 @@ public static class ConPtyShell
     private const int FD_READ = (1 << 0);
 
 
-
-
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFOEX
     {
@@ -1028,7 +1027,6 @@ public static class ConPtyShell
 
     [DllImport("WS2_32.DLL", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern bool WSACloseEvent(IntPtr hEvent);
-
 
     [DllImport("ntdll.dll")]
     private static extern uint NtSuspendProcess(IntPtr processHandle);
